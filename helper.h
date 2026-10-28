@@ -1,0 +1,1 @@
+int int_from_string(char *string);
