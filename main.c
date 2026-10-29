@@ -228,7 +228,7 @@ void start_loop(Config *cf, Running *run_stats) {
     init_running(run_stats);
     while(1) {
         if (manage_workers(cf, run_stats) != DAEMON) return;
-        sleep(0.5);
+        sleep(1000);
     }
 }
 
