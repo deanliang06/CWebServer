@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <sys/socket.h>
 #include <fcntl.h>
 
 
@@ -97,9 +98,10 @@ int main(int argc, char *argv[]) {
 }
 
 void init_running(Running *rn) {
-    rn->fd_opened = 0;
+    rn->fds_opened = 0;
     rn->tail = NULL;
     rn->worker_head = NULL;
+    rn->listen_socket = socket(AF_INET, SOCK_STREAM, 0);
 }
 
 void init_hfile(char *buf, int num_name) {
@@ -116,7 +118,10 @@ void init_hfile(char *buf, int num_name) {
 void close_other_fd(Running *run_stats, int fd_to_keep) {
     Worker *head = run_stats->worker_head;
     while (head) {
-        if (head->running_fd != fd_to_keep) close(head->running_fd);
+        if (head->running_fd != fd_to_keep) {
+            close(head->running_fd);
+            close(head->signal_fd);
+        }
         head = head->next;
     }
 }
@@ -164,15 +169,19 @@ int manage_workers(Config *cf, Running *run_stats) {
 
             //create the health file for seeing health patterns
             char hfile_name[HEALTH_FILE_NAME_BUF];
-            init_hfile(&hfile_name, run_stats->fd_opened);
-            int fd = open(hfile_name, O_RDONLY | O_EXCL | O_CREAT);
+            init_hfile(&hfile_name, run_stats->fds_opened);
+            int health_fd = open(hfile_name, O_RDONLY | O_EXCL | O_CREAT);
+
+            //create UNIX socket for signal wakeups
+            int unix_fd = socket(AF_UNIX, SOCK_DGRAM, 0);
 
             //adding itself to the Running Linked list
             Worker *work = (Worker *)(malloc(sizeof(Worker)));
             run_stats->tail->next = work;
             work->next = NULL;
             work->prev = run_stats->tail;
-            work->running_fd = fd;
+            work->running_fd = health_fd;
+            work->signal_fd = unix_fd;
             run_stats->tail = work;
 
             //forking and then clearing other fds that don't belong to it
@@ -181,10 +190,10 @@ int manage_workers(Config *cf, Running *run_stats) {
                 work->proc_id = new_proc_id;
             } else {
                 close_other_fds(run_stats, fd);
-                run_worker_loop(cf, run_stats->fd_opened);
+                run_worker_loop(cf->timeout, fd, unix_fd);
                 return WORKER;
             }
-            run_stats->fd_opened++;
+            run_stats->fds_opened++;
         }
     }
     return DAEMON;

@@ -6,6 +6,7 @@ typedef struct Config {
 typedef struct Worker {
     int proc_id;
     int running_fd;
+    int signal_fd;
     Worker *prev;
     Worker *next;
 } Worker;
@@ -13,5 +14,6 @@ typedef struct Worker {
 typedef struct Running {
     Worker *worker_head;
     Worker *tail;
-    int fd_opened;
+    int fds_opened;
+    int listen_socket;
 } Running;
