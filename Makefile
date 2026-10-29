@@ -1,4 +1,4 @@
-files=helper.o main.o config.h
+files=helper.o main.o types.h
 CC=gcc
 
 

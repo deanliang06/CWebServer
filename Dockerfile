@@ -9,5 +9,5 @@ RUN apt-get update && apt-get install -y \
 EXPOSE 8000
 
 WORKDIR /app
-
+#Standard C library (libc, -lc)
 CMD ["/bin/bash"]
