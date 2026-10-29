@@ -2,18 +2,23 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <stdlib.h>
 #include <sys/socket.h>
 #include <fcntl.h>
+#include <string.h>
 
 
 #include "types.h"
 #include "helper.h"
+#include "socket.h"
+#include "workers.h"
 
 #define WORKER_NUM_STRING 1
 #define WORKER_NUM_ERR 2
 #define WORKER_TIMEOUT_STRING 3
 #define WORKER_TIMEOUT_ERR 4
 #define INCORRECT_OPT 5
+#define SOCKET_CREAT_ERR 6
 
 
 #define DAEMON 700
@@ -42,6 +47,9 @@ void print_err(int err) {
         case WORKER_TIMEOUT_STRING:
             string = "Please valid positive int for timeout time";
             break;
+        case SOCKET_CREAT_ERR:
+            string= "Something went wrong with socket creation";
+            break;
         default:
             string = "Unknown error occurred";
     }
@@ -66,7 +74,7 @@ int main(int argc, char *argv[]) {
     init_config_defaults(&cf);
     
     int option;
-    while ((option = getopt(argc, argv[1], "n:t:h")) != -1) {
+    while ((option = getopt(argc, argv + 1, "n:t:h")) != -1) {
         switch(option) {
             case 'n':
                 int workers = int_from_string(optarg);
@@ -100,8 +108,12 @@ int main(int argc, char *argv[]) {
 void init_running(Running *rn) {
     rn->fds_opened = 0;
     rn->tail = NULL;
-    rn->worker_head = NULL;
-    rn->listen_socket = socket(AF_INET, SOCK_STREAM, 0);
+    rn->head = NULL;
+    int listen_fd;
+    if ((listen_fd = init_listen_socket()) == -1) {
+        print_err(SOCKET_CREAT_ERR);
+    }
+    rn->listen_socket = listen_fd;
 }
 
 void init_hfile(char *buf, int num_name) {
@@ -112,11 +124,11 @@ void init_hfile(char *buf, int num_name) {
         buf[idx] = '0'+digit;
         idx++;
     }
-    buf[idx] = '\0';
+    memcpy(buf+idx, "health", 7);
 }
 
-void close_other_fd(Running *run_stats, int fd_to_keep) {
-    Worker *head = run_stats->worker_head;
+void close_other_fds(Running *run_stats, int fd_to_keep) {
+    Worker *head = run_stats->head;
     while (head) {
         if (head->running_fd != fd_to_keep) {
             close(head->running_fd);
@@ -126,8 +138,16 @@ void close_other_fd(Running *run_stats, int fd_to_keep) {
     }
 }
 
+void kill_all(Config *cf) {
+    return;
+}
+
+void kill_process_and_rm_list(Worker *proc) {
+    return;
+}
+
 int manage_workers(Config *cf, Running *run_stats) {
-    Worker *head = run_stats->worker_head;
+    Worker *head = run_stats->head;
     int count = 0;
     while (head != NULL) {
         head = head->next;
@@ -138,7 +158,7 @@ int manage_workers(Config *cf, Running *run_stats) {
     if (numNeeded < 0) {
         //numNeeded to delete (we will delete last updated ones via custom sig_kill)
         for (int i = 0; i < -1*numNeeded; i++) {
-            Worker *head = run_stats->worker_head;
+            Worker *head = run_stats->head;
             Worker *min = NULL;
 
             //get rn's time
@@ -152,7 +172,7 @@ int manage_workers(Config *cf, Running *run_stats) {
                 int fd = head->running_fd;
                 if (fstat(fd, &st)) {
                     kill_all(cf);
-                    return;
+                    return 1;
                 }
                 
                 //if the health file has later access time prioritize killing it
@@ -169,7 +189,7 @@ int manage_workers(Config *cf, Running *run_stats) {
 
             //create the health file for seeing health patterns
             char hfile_name[HEALTH_FILE_NAME_BUF];
-            init_hfile(&hfile_name, run_stats->fds_opened);
+            init_hfile(hfile_name, run_stats->fds_opened);
             int health_fd = open(hfile_name, O_RDONLY | O_EXCL | O_CREAT);
 
             //create UNIX socket for signal wakeups
@@ -177,7 +197,11 @@ int manage_workers(Config *cf, Running *run_stats) {
 
             //adding itself to the Running Linked list
             Worker *work = (Worker *)(malloc(sizeof(Worker)));
-            run_stats->tail->next = work;
+            if (!run_stats->tail) {
+                run_stats->head = work;
+            } else {
+                run_stats->tail->next = work;
+            }
             work->next = NULL;
             work->prev = run_stats->tail;
             work->running_fd = health_fd;
@@ -189,8 +213,8 @@ int manage_workers(Config *cf, Running *run_stats) {
             if (new_proc_id) {
                 work->proc_id = new_proc_id;
             } else {
-                close_other_fds(run_stats, fd);
-                run_worker_loop(cf->timeout, fd, unix_fd);
+                close_other_fds(run_stats, health_fd);
+                run_worker_loop(cf->timeout, health_fd, unix_fd, run_stats->listen_socket);
                 return WORKER;
             }
             run_stats->fds_opened++;
@@ -202,7 +226,7 @@ int manage_workers(Config *cf, Running *run_stats) {
 
 void start_loop(Config *cf, Running *run_stats) {
     init_running(run_stats);
-    while(true) {
+    while(1) {
         if (manage_workers(cf, run_stats) != DAEMON) return;
         sleep(0.5);
     }

@@ -1,0 +1,1 @@
+int end_of_request(char *buf, int buf_size);

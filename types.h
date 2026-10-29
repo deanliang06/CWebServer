@@ -7,12 +7,12 @@ typedef struct Worker {
     int proc_id;
     int running_fd;
     int signal_fd;
-    Worker *prev;
-    Worker *next;
+    struct Worker *prev;
+    struct Worker *next;
 } Worker;
 
 typedef struct Running {
-    Worker *worker_head;
+    Worker *head;
     Worker *tail;
     int fds_opened;
     int listen_socket;
