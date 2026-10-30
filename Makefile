@@ -1,4 +1,4 @@
-files=helper.o main.o types.h workers.o socket.o request.o
+files=helper.o main.o types.h workers.o socket.o request.o worker_queue.o
 CC=gcc
 
 

@@ -1,4 +1,5 @@
 #include <limits.h>
+#include <string.h>
 
 int int_from_string(char *string) {
     int num = 0;
@@ -11,4 +12,20 @@ int int_from_string(char *string) {
         idx++;
     }
     return num;    
+}
+
+void init_hfile(char *buf, int num_name) {
+    int idx = 0;
+    if (num_name == 0) {
+        buf[0] = '0';
+        idx++;
+    }
+
+    while (num_name > 0) {
+        int digit = num_name % 10;
+        num_name/=10;
+        buf[idx] = '0'+digit;
+        idx++;
+    }
+    memcpy(buf+idx, "health", 7);
 }
