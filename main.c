@@ -114,6 +114,7 @@ int main(int argc, char *argv[]) {
 
                 if (lifetime < 30 || lifetime > 3600) return 1;
                 cf.max_lifetime = lifetime;
+                break;
             case 'h':
                 printHelp();
                 return 0;
