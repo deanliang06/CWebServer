@@ -229,7 +229,7 @@ void kill_process_and_rm_list(Worker *proc, Running *run_stats) {
         run_stats->tail = prev;
     }
 
-    kill(proc->proc_id, SIGTERM);
+    kill(proc->proc_id, SIGINT);
     write(proc->signal_fd, "", 1);
     close(proc->running_fd);
     close(proc->signal_fd);

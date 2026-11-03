@@ -132,7 +132,7 @@ void update_health(int health_fd) {
 void handle_queue() {
     while (!empty(&queue)) {
         int signal = pop_queue(&queue);
-        if (signal & SIGTERM) health = 0;
+        if (signal & SIGINT) health = 0;
     }
 }
 
