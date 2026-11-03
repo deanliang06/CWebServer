@@ -1,1 +1,1 @@
-void run_worker_loop(int timeout, int health_fd, int unix_fd, int listen_fd);
+void run_worker_loop(Config *cf, int health_fd, int unix_fd, int listen_fd);

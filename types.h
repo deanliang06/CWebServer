@@ -4,6 +4,7 @@ typedef struct Config {
     int workers;
     int max_lifetime;
     int timeout;
+    struct Routes *routes;
 } Config;
 
 typedef struct Worker {
@@ -21,3 +22,12 @@ typedef struct Running {
     int fds_opened;
     int listen_socket;
 } Running;
+
+typedef struct Route {
+    char *target;
+    char *(*f)(char *, char *);
+    struct Route *next;
+} Route;
+typedef struct Routes {
+    Route *head_route;
+} Routes;

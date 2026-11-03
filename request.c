@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "helper.h"
+#include "types.h"
 
 #define PROTOCOL_NOT_SUPPORTED ""
 
@@ -19,7 +20,7 @@ typedef enum {
 } RequestIdx;
 
 typedef struct Headers {
-    RequestLine req_line;
+    RequestLine *req_line;
     char *host;
     char *content_type;
     int content_length;
@@ -113,7 +114,7 @@ void parse_header(Headers *req_config, char *buf, int len) {
     if (!key_found) return;
 
     for (int i = 0; i < 7; i++) {
-        if (!strcmp(header_key, supported_headers[i])) {
+        if (!strcasecmp(header_key, supported_headers[i])) {
 
             //the : is at index end_header_key and there is a space after :
             //therfore len-end_header_key
@@ -172,17 +173,28 @@ Headers *parse_headers(char * full_req, int size) {
     }
 
     printf("Content_length: %d\n", req_config->content_length);
-    
+    req_config->req_line = req_line;
     return req_config;
 }
 
-char *get_response(Headers *headers, char *body) {
-    //not implemented yet but for now send default GET response
-    return 
-    "HTTP/1.1 200 OK\r\n"
+char *get_response(Config *cf, Headers *headers, char *body) {
+    Route *head = cf->routes->head_route;
+    while (head) {
+        if (strcmp(headers->req_line->target, head->target)) {
+            char *resp = head->f(headers->req_line->method, body);
+            return resp;
+        }
+        head = head->next;
+    }
+    return NULL;
+}
+
+char *target_not_found_response() {
+    return
+    "HTTP/1.1 404 Not Found\r\n"
     "Content-Type: text/plain\r\n"
-    "Content-Length: 5\r\n"
+    "Content-Length: 9\r\n"
     "Connection: close\r\n"
     "\r\n"
-    "Hello";
+    "Not Found";
 }

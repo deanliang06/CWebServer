@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 
 #include "socket.h"
+#include "types.h"
 #include "request.h"
 #include "worker_queue.h"
 
@@ -36,7 +37,7 @@ int init_signals() {
     new.sa_handler = handle_signal;
     new.sa_flags = SA_NODEFER;
 
-    if (sigaction(SIGTERM, &new, &old)) return -1;
+    if (sigaction(SIGINT, &new, &old)) return -1;
     return 0;
 }
 
@@ -62,7 +63,7 @@ static void print_err(int err) {
     printf("%s\n", string);
 }
 
-void handle_conn(int listen_fd) {
+void handle_conn(int listen_fd, Config *cf) {
     int conn_fd = accept_conn(listen_fd);
     if (conn_fd == -1) return;
 
@@ -92,7 +93,7 @@ void handle_conn(int listen_fd) {
     if (header_vals->content_length)  {
         //read rest of body if there is body
         buf[bufUsed] = '\0';
-        while (!body_enough(buf, bufAdded, header_vals->content_length)) {
+        while (!body_enough(buf, bufUsed, header_vals->content_length)) {
             bufAdded = read(conn_fd, buf+bufUsed, curBufSize-bufUsed);
             //if we add the rest of the buf then allocate new buf with twice size
             if (bufAdded == curBufSize-bufUsed) {
@@ -109,13 +110,18 @@ void handle_conn(int listen_fd) {
     char *body = NULL;
     if (header_vals->content_length) {
         body = extract_body(buf, bufUsed,header_vals->content_length);
-        printf("%s\n", body);
     }
-    char *response = get_response(header_vals, body);
-
+    char *response = get_response(cf, header_vals, body);
+    if (!response) response = target_not_found_response();
     send(conn_fd, response, strlen(response), MSG_DONTWAIT);
     close(conn_fd);
-    printf("Request: %s\n",buf);
+    
+    printf("%s\n", response);
+    
+    //will functionize this soon
+    free(body);
+    free(header_vals->req_line);
+    free(header_vals);
     free(buf);
 }
 
@@ -131,7 +137,8 @@ void handle_queue() {
 }
 
 
-void run_worker_loop(int timeout, int health_fd, int pipe_fd, int listen_fd) {
+void run_worker_loop(Config *cf, int health_fd, int pipe_fd, int listen_fd) {
+    int timeout = cf->timeout;
     if (init_signals()) return;
     struct pollfd fds[2];
 
@@ -146,6 +153,7 @@ void run_worker_loop(int timeout, int health_fd, int pipe_fd, int listen_fd) {
     while (health) {
         //wait on 
         int num_fds_ready = poll(fds, 2, timeout*1000);
+        update_health(health_fd);       
         if (!num_fds_ready) continue;
         
         //check if wakeup (in this case process signals)
@@ -164,12 +172,9 @@ void run_worker_loop(int timeout, int health_fd, int pipe_fd, int listen_fd) {
             //connect to recieving port
             print_err(SOCKET_READ);
 
-            handle_conn(listen_fd);
+            handle_conn(listen_fd, cf);
             print_err(SOCKET_RESP);
             fds[0].revents = 0;
         }
-
-        update_health(health_fd);       
-        sleep(1);
     }
 }
