@@ -1,6 +1,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <errno.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -11,9 +12,16 @@ int init_listen_socket() {
     adr.sin_addr.s_addr = INADDR_ANY;
     adr.sin_port = htons(8000);
 
-    int sfd = socket(AF_INET, SOCK_STREAM, 0);
+    errno = 0;
+    int sfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+
+    if (errno == EACCES) {
+        return -3;
+    }
+
+
     if (bind(sfd, (struct sockaddr *)&adr, sizeof(adr))) {
-        return -1;
+        return -2;
     }
 
     if (listen(sfd, 10)) {
@@ -24,8 +32,10 @@ int init_listen_socket() {
 }
 
 int accept_conn(int listen_fd) {
-    int new_fd = accept(listen_fd, NULL, NULL);
 
-    if (new_fd == -1) return -1; //some err handle necessary
+    errno = 0;
+    int new_fd = accept(listen_fd, NULL, NULL);
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return -1; //if nothing to accept (other worker handled)
+
     return new_fd;
 }

@@ -19,6 +19,7 @@
 #define CONNECT_ERR 10
 #define PIPE_READ_DEBUG 11
 #define SOCKET_READ 12
+#define SOCKET_RESP 13
 
 SignalQueue queue = {};
 int health = 1;
@@ -51,6 +52,9 @@ static void print_err(int err) {
         case SOCKET_READ:
             string= "We are going to socket";
             break;
+        case SOCKET_RESP:
+            string="We are done with sock";
+            break;
         default:
             string = "Unknown error occurred";
     }
@@ -60,6 +64,7 @@ static void print_err(int err) {
 
 void handle_conn(int listen_fd) {
     int conn_fd = accept_conn(listen_fd);
+    if (conn_fd == -1) return;
 
     char *buf = (char *)malloc(sizeof(char) * INIT_REQUEST_SIZE);
     int curBufSize = INIT_REQUEST_SIZE;
@@ -69,9 +74,9 @@ void handle_conn(int listen_fd) {
     int bufAdded = 0;
     int bufUsed = 0;
 
-    //HTTP1.1
-    while (!end_of_request(buf, curBufSize)) {
-        bufAdded = read(conn_fd, buf, curBufSize-bufUsed);
+    //HTTP1.1 eventually
+    while (!end_of_header(buf, bufAdded)) {
+        bufAdded = read(conn_fd, buf+bufUsed, curBufSize-bufUsed);
         //if we add the rest of the buf then allocate new buf with twice size
         if (bufAdded == curBufSize-bufUsed) {
             char *newBuf = (char *)malloc(sizeof(char) * curBufSize*2);
@@ -83,11 +88,34 @@ void handle_conn(int listen_fd) {
         bufUsed+=bufAdded;
     }
 
-    
-    send(conn_fd, "Recieved\r\n\r\n", 9, MSG_DONTWAIT);
-    close(conn_fd);
+    Headers *header_vals = parse_headers(buf, bufUsed);
+    if (header_vals->content_length)  {
+        //read rest of body if there is body
+        buf[bufUsed] = '\0';
+        while (!body_enough(buf, bufAdded, header_vals->content_length)) {
+            bufAdded = read(conn_fd, buf+bufUsed, curBufSize-bufUsed);
+            //if we add the rest of the buf then allocate new buf with twice size
+            if (bufAdded == curBufSize-bufUsed) {
+                char *newBuf = (char *)malloc(sizeof(char) * curBufSize*2);
+                memcpy(newBuf, buf, curBufSize);
+                free(buf);
+                buf = newBuf;
+                curBufSize*=2;
+            }
+            bufUsed+=bufAdded;
+        }
+    }
 
-    printf("%s\n",buf);
+    char *body = NULL;
+    if (header_vals->content_length) {
+        body = extract_body(buf, bufUsed,header_vals->content_length);
+        printf("%s\n", body);
+    }
+    char *response = get_response(header_vals, body);
+
+    send(conn_fd, response, strlen(response), MSG_DONTWAIT);
+    close(conn_fd);
+    printf("Request: %s\n",buf);
     free(buf);
 }
 
@@ -137,6 +165,7 @@ void run_worker_loop(int timeout, int health_fd, int pipe_fd, int listen_fd) {
             print_err(SOCKET_READ);
 
             handle_conn(listen_fd);
+            print_err(SOCKET_RESP);
             fds[0].revents = 0;
         }
 

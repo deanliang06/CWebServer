@@ -20,18 +20,25 @@
 #define WORKER_TIMEOUT_STRING 3
 #define WORKER_TIMEOUT_ERR 4
 #define INCORRECT_OPT 5
-#define SOCKET_CREAT_ERR 6
 #define WORKER_LIFE_STRING 7
 #define WORKER_LIFE_ERR 8
-#define debug_print 11
+#define SOCKET_CREAT_ERR 9
+#define SOCKET_BIND_ERR 10
+#define SOCKET_LISTEN_ERR 11
+#define IMPROPER_SIGNAL 12
 
+#define debug_print 100
 
 #define DAEMON 700
 #define WORKER 701
 
 #define HEALTH_FILE_NAME_BUF 128
 
+Config cf = {};
+Running running_stats = {};
+
 void start_loop(Config *cf, Running *run_stats); //main loop function
+void kill_all(Config *cf, Running *run_stats);
 
 void init_config_defaults(Config *cf) {
     cf->timeout = 30;
@@ -56,11 +63,20 @@ void print_err(int err) {
         case SOCKET_CREAT_ERR:
             string= "Something went wrong with socket creation";
             break;
+        case SOCKET_BIND_ERR:
+            string = "Something went wrong with socket binding";
+            break;
+        case SOCKET_LISTEN_ERR:
+            string = "Something went wrong with socket listening";
+            break;
         case WORKER_LIFE_ERR:
             string="Please enter a lifetime in between 30 seconds and an hour in seconds";
             break;
         case WORKER_LIFE_STRING:
             string="Please enter valid positive int for worker max lifetime";
+            break;
+        case IMPROPER_SIGNAL:
+            string="Signal setup error";
             break;
         case debug_print:
             string = "Got here";
@@ -78,15 +94,34 @@ void printHelp() {
         (include -n for num workers and -t for timeout time -l for worker max lifetime)\n");
 }
 
+
+void kill_all_signal(int signum) {
+    kill_all(&cf, &running_stats);
+    exit(1);
+}
+
+
+int signal_shutdown_setup() {
+    struct sigaction old = {};
+    struct sigaction new = {};
+
+    memset(&new, 0, sizeof(sigaction));
+    new.sa_handler = kill_all_signal;
+    new.sa_flags = SA_NODEFER;
+
+    if (sigaction(SIGTERM, &new, &old)) return -1;
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     if (argc > 5) {
         fprintf(stderr, "Bro thinks there are more than 3 args");
         return 1;
     }
 
-    Config cf = {};
-    Running running_stats = {};
     init_config_defaults(&cf);
+
+    signal_shutdown_setup();
     
     int option;
     while ((option = getopt(argc, argv + 1, "n:t:l:h")) != -1) {
@@ -133,8 +168,8 @@ void init_running(Running *rn) {
     rn->tail = NULL;
     rn->head = NULL;
     int listen_fd;
-    if ((listen_fd = init_listen_socket()) == -1) {
-        print_err(SOCKET_CREAT_ERR);
+    if ((listen_fd = init_listen_socket()) < 0) {
+        print_err(12+listen_fd);//for debugging
     }
     rn->listen_socket = listen_fd;
 }
@@ -194,7 +229,8 @@ int init_worker(Config *cf, Running *run_stats) {
     //create the health file for seeing health patterns
     char hfile_name[HEALTH_FILE_NAME_BUF];
     init_hfile(hfile_name, run_stats->fds_opened);
-    int health_fd = open(hfile_name, O_RDONLY | O_EXCL | O_CREAT);
+    FILE * f = tmpfile();
+    int health_fd = fileno(f);
 
     //create UNIX socket for signal wakeups
     int pipes[2];
