@@ -1,124 +1,160 @@
-# CWebServer
+﻿# CWebServer
 
-A work-in-progress web server written in C, exploring POSIX sockets and a pool of worker processes. The parent process opens a shared TCP listener, forks workers, and creates a pipe for each worker. Workers use `poll()` to wait for incoming connections and pipe wakeups.
+An experimental HTTP/1.1 server and small routing framework written in C. A supervisor creates a pool of worker processes sharing a TCP listener. Workers use `poll()` for connection readiness and a per-worker pipe for signal wakeups.
 
-This is an experimental prototype with basic HTTP/1.1 request parsing and a fixed `Hello` response. It does not yet implement a complete HTTP server, routing, framework integration, or file serving. Connections use plain HTTP; TLS/HTTPS is not implemented.
+The example application serves an HTML welcome page at `/`, a health response at `/health`, and a plain-text 404 for unmatched targets. This is a learning project; HTTP parsing, shutdown, and resource management are still incomplete.
 
 ## Requirements
 
-- Linux or a compatible POSIX environment with `fork()`, Unix sockets, and `poll()`.
-- GCC with support for GNU C23 (`-std=gnu2x`).
-- Docker for the included Ubuntu development environment (optional).
+- Linux with GCC and Make, including POSIX process, signal, socket, and polling APIs.
+- On Windows, use WSL or the included Docker development environment.
 
-On Windows, use the Docker environment below or a Linux environment such as WSL. The `.exe` filename is just the project's executable name; the source uses POSIX APIs.
+Despite its name, `server.exe` is a Linux executable when built in Linux. It is not a native Windows program.
 
 ## Build and run
 
-The signal setup in both `main.c` and `workers.c` uses `sizeof(sigaction)`, which refers to a function rather than the signal-action structure. Replace it with the intended structure size (for example, `sizeof(new)`) before building. The commands below describe the intended build and launch workflow, not a verified working release.
-
-From the repository root in a Linux shell, after resolving that blocker:
+From the repository root in a Linux shell:
 
 ```sh
-gcc -std=gnu2x -Wall -Wextra main.c helper.c socket.c workers.c request.c worker_queue.c -o server.exe
+make
 ./server.exe
 ```
 
-The server binds to **all IPv4 interfaces on port 8000**, with a listen backlog of 10. Defaults are **4 workers**, a **30-second polling timeout**, and a **120-second maximum worker lifetime**. The polling timeout controls how long a worker waits in `poll()`; it is not a request deadline. The parent checks worker ages and replenishes the worker list once per second.
+The server listens on **all IPv4 interfaces, port 8000**, with a listen backlog of 10. The current `main.c` calls the blocking `start_server(0)` function, so the application stays in the supervisor loop until shutdown.
 
-Use a local development environment. Request handling, error handling, and process cleanup are incomplete.
+Try these manual checks from another terminal:
 
-## Request handling
-
-- The shared listening socket is nonblocking. If another worker accepts a pending connection first, `accept_conn()` handles `EAGAIN`/`EWOULDBLOCK` by returning without a connection. Accepted client sockets still use blocking reads.
-- Workers buffer incoming data, starting with 1024 bytes and doubling the allocation when full. They look for `\r\n\r\n` to locate the end of the headers.
-- The parser extracts the request-line method, target, and protocol and checks for `HTTP/1.1`. These request-line fields are not yet attached to the returned `Headers` structure.
-- Recognized header names are `Host`, `Content-Type`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Accept`, and `Authorization`. Matching is currently case-sensitive and assumes a space after the colon.
-- A nonzero `Content-Length` triggers body collection and extraction. Recording `Transfer-Encoding` does not implement chunked-body decoding.
-- The response builder currently ignores the request and returns this fixed response, then the worker closes the connection:
-
-```http
-HTTP/1.1 200 OK
-Content-Type: text/plain
-Content-Length: 5
-Connection: close
-
-Hello
+```sh
+curl --http1.1 -i http://localhost:8000/
+curl --http1.1 -i http://localhost:8000/health
+curl --http1.1 -i http://localhost:8000/missing
 ```
 
-After resolving the build issues and starting the server, a basic manual check is `curl --http1.1 -i http://localhost:8000/`. This is an intended smoke check, not a verified test result.
+The root route returns HTML containing “Hello from C!”. The health route returns `{"health": "ok"}`. Both use `format_get()`, which currently labels every successful response `Content-Type: text/html`, including the health response.
+
+Use Ctrl+C (`SIGINT`) to request shutdown. SIGTERM does not currently have a coordinated shutdown handler. These commands are manual checks, not an automated test suite or a guarantee of reliable shutdown.
+
+The Makefile recompiles object files when their source or any project header changes. It does not generate `.d` dependency files.
+
+## Framework interface
+
+Register routes before starting the server:
+
+```c
+#include "server.h"
+#include "http_helper.h"
+
+char *hello(Headers *headers, char *body) {
+    (void)headers;
+    (void)body;
+    return format_get("<h1>Hello from C!</h1>");
+}
+
+int main(void) {
+    register_route("/", hello);
+    return start_server(0);
+}
+```
+
+Callbacks have the signature `char *handler(Headers *headers, char *body)`. They receive parsed request metadata and an extracted body, or `NULL` when no body was collected. The request method, target, and protocol are available through `headers->req_line`.
+
+A callback returns a complete, null-terminated HTTP response. `format_get()` allocates a 200 OK response with a content length and HTML content type. The worker sends the response and closes the client connection. Response ownership is not fully implemented: the worker currently does not free responses allocated by `format_get()`.
+
+Routing compares the complete request target with `strcmp()`. It does not distinguish methods, extract query parameters, or support path parameters. For example, `/health?check=1` does not match `/health`. Routes are prepended to a list, so the most recently registered duplicate target wins. Registering routes after workers have forked does not update their inherited copies.
+
+### Configuration
+
+`start_server(count, ...)` accepts zero to three positional integer settings. `count` specifies how many follow it:
+
+```c
+start_server(0);              /* Defaults. */
+start_server(1, 2);           /* Two workers. */
+start_server(3, 4, 30, 120);   /* Workers, poll timeout, worker lifetime. */
+```
+
+| Setting | Default | Accepted range |
+| --- | --- | --- |
+| Worker count | 4 | 1–50 |
+| Worker polling timeout | 30 seconds | 5–960 seconds |
+| Maximum worker lifetime | 120 seconds | 30–3600 seconds |
+
+The polling timeout is not a client request deadline. The supervisor checks worker lifetimes and its tracked worker count approximately once per second. The example does not parse command-line arguments; the old `-n`, `-t`, and `-l` usage text in `server.c` is stale.
+
+### Background startup
+
+`server.c` also implements `start_server_no_head(count, ...)`, which forks a supervisor and returns to the caller. `kill_server()` sends SIGINT to that supervisor and waits for it.
+
+The example uses blocking startup and does not exercise this interface. `kill_server()` is intended for the background mode; blocking startup leaves `child_pid` at `-1`, so calling it in that mode can signal unrelated permitted processes.
+
+## Request processing
+
+- The shared listening socket is nonblocking; accepted client sockets use blocking reads.
+- Each worker handles one accepted connection at a time. Request buffers start at 1024 bytes and grow as needed.
+- Parsing expects HTTP/1.1 and recognizes `Host`, `Content-Type`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Accept`, and `Authorization`. Header names are compared without case sensitivity, and parsing assumes a space after the colon.
+- A nonzero `Content-Length` triggers body collection. Chunked decoding, persistent connections, TLS, and static-file serving are not implemented.
+- Each connection receives one response and is closed. Sending currently uses one nonblocking `send()` without retrying partial writes.
+
+## Worker lifecycle and shutdown
+
+Before forking each worker, the supervisor creates an anonymous temporary health file and a pipe. The worker inherits the listener, keeps its pipe read end, and updates the health file timestamps after `poll()` returns, including on timeouts.
+
+Lifetime expiration sends SIGINT and a pipe wakeup, removes the worker from the tracking list, and allows a replacement to be created. For full shutdown, `kill_all()` signals and wakes all tracked workers first, then waits for each PID with `waitpid()`, retrying interrupted waits. Worker-side cleanup no longer calls the supervisor's worker-killing function.
+
+Graceful shutdown remains unfinished:
+
+- Shutdown cleanup still runs inside the supervisor's signal handler and uses operations such as allocation and freeing. Workers also allocate queue nodes inside their signal handler.
+- An idle or incomplete client connection can trap a worker in its blocking read loops. EOF and read errors are not handled, so the supervisor can wait indefinitely for that worker.
+- The worker checks pipe hangup/error flags after clearing `revents`, so that check cannot independently trigger an exit. Queue processing still determines whether it stops.
+- The worker loop contains a five-second sleep after processing events, which delays further work and can delay shutdown.
+- Lifetime-based removals do not reap their children. Unexpected child exits are not detected by the tracked worker-count check.
+
+## Other current limitations
+
+- Header completion uses the latest read length instead of the total buffered length. Requests split across reads may stall. There are no request size limits or read deadlines.
+- Header-value termination writes past its allocation. Missing header fields are not consistently initialized, and parser failures can reach unchecked null pointers in the worker.
+- Parsed strings, response buffers, and popped signal queue nodes are not fully freed. Allocation, fork, pipe, and temporary-file failures need stronger handling.
+- Worker-count reduction does not advance its health-file scan iterator and can hang; selection can also leave no worker to remove.
+- Signal setup still uses `sizeof(sigaction)` instead of the intended structure size, such as `sizeof(new)`. GCC accepts this as an extension; it is not a correct portable structure initialization expression.
 
 ## Docker development environment
 
-The Dockerfile provides Ubuntu 24.04 with Bash, GCC, Make, and curl. It opens a shell; it does not build or start the server automatically.
+The Dockerfile installs Bash, GCC, Make, and curl on Ubuntu 24.04. It starts a shell; it does not build or launch the application automatically.
 
-In Bash, run the included helper:
+From Bash:
 
 ```sh
 bash run.sh
 ```
 
-Or run its commands directly (also suitable for PowerShell):
+Or run the commands directly:
 
 ```sh
 docker build -t ubuntu .
 docker run -it --rm -v "${PWD}:/app" -w /app -p 8000:8000 ubuntu
 ```
 
-Inside the container, run the build and launch commands above. The repository is mounted at `/app`, and port 8000 is published to the host.
-
-## Command-line options
-
-| Option | Purpose | Default |
-| --- | --- | --- |
-| `-n NUMBER` | Number of worker processes; use 1–50 | `4` |
-| `-t SECONDS` | Worker polling timeout; accepted range 5–960 | `30` |
-| `-l SECONDS` | Maximum worker lifetime; accepted range 30–3600 | `120` |
-| `-h` | Print usage information and exit | — |
-
-The current argument parser skips the first argument after the executable. Supply a placeholder when using options:
+Inside the container:
 
 ```sh
-./server.exe unused -n 2
-./server.exe unused -t 30
-./server.exe unused -h
+make
+./server.exe
 ```
 
-The placeholder is not loaded or executed. Although the built-in help describes a “framework entry file,” framework integration is not implemented. The argument-count check currently prevents supplying multiple value-taking options together in the format above. Worker counts greater than 50 print an error but are not correctly rejected; stay within the documented range.
-
-## Worker lifecycle
-
-- Before each fork, the parent creates an anonymous temporary health file with `tmpfile()` and a pipe. The parent keeps the pipe's write end; the worker keeps its read end alongside the inherited listening socket.
-- The parent records worker start times. When a worker exceeds the maximum lifetime, the parent sends `SIGTERM`, writes a wakeup byte to its pipe, removes its tracking entry, and creates a replacement during the worker-count check.
-- The worker's signal handler adds signals to a linked queue in `worker_queue.c`. A pipe wakeup is intended to trigger queue processing in the worker loop.
-- Workers attempt to update health-file timestamps with `futimens()` after handling ready descriptors. Poll timeouts skip this update, so these timestamps are not periodic idle heartbeats.
-- The parent now registers a `SIGTERM` handler that attempts to terminate all tracked workers and exit. Reliable graceful shutdown is still unfinished.
-
-This lifecycle is still under development; the limitations below affect shutdown and worker replacement.
-
-## Current behavior and limitations
-
-- HTTP parsing is partial: routing, method-specific behavior, chunked bodies, keep-alive, and structured HTTP error responses are not implemented.
-- Header and body completion checks currently receive the latest read size instead of the total buffered size. Requests split across reads may hang. EOF, read errors, request deadlines, and maximum request sizes are not handled.
-- Header-value termination writes past its allocation, request logging can read buffers without a terminating null byte, and parsed headers/bodies are not freed. Parser validation and allocation handling remain unfinished; unsupported protocols can lead to a null-pointer dereference in the worker.
-- Response sending uses a single nonblocking `send()` without handling partial writes or errors.
-- Health files now use temporary storage rather than named files in the working directory. Temporary-file creation errors, timestamp updates, and stream/descriptor cleanup are not fully handled.
-- Signal queue handling is unfinished: the handler allocates memory, `empty()` returns the opposite of what the processing loop expects, and popped queue nodes are not freed. Termination is not reliable.
-- Worker removal does not reap child processes with `waitpid()`. Unexpected exits are not detected by the worker-count check, and the worker-side cleanup path needs correction.
-- The worker-count reduction path does not advance its list iterator and can hang. Graceful shutdown and process cleanup remain incomplete.
-
-Run in the foreground and use Ctrl+C to interrupt. Check for remaining worker processes after a run; complete automatic process cleanup is not implemented.
+The repository is mounted at `/app`, and port 8000 is published to the host.
 
 ## Source layout
 
-| File | Role |
+| Files | Role |
 | --- | --- |
-| `main.c` | Configuration, parent loop, worker creation, pipe setup, and lifetime-based removal |
+| `main.c` | Example HTML and health routes; blocking server startup |
+| `server.c`, `server.h` | Route registration, configuration, supervisor loop, worker creation, and shutdown |
 | `socket.c`, `socket.h` | TCP listener setup and connection acceptance |
-| `workers.c`, `workers.h` | Worker polling loop, signal handling, health updates, and request buffering |
-| `worker_queue.c`, `worker_queue.h` | Linked queue for pending worker signals |
-| `request.c`, `request.h` | Basic HTTP/1.1 request-line/header parsing, body completion and extraction, and a fixed response |
-| `helper.c`, `helper.h` | Integer argument parsing and health-file naming |
-| `types.h` | Configuration and worker tracking structures |
-| `Makefile` | Existing build rules; the explicit GCC command above avoids relying on these unfinished rules |
-| `Dockerfile`, `run.sh` | Container development environment |
-| `plan.md` | Early design notes, including planned framework integration |
+| `workers.c`, `workers.h` | Worker polling, request buffering, signal processing, and health updates |
+| `request.c`, `request.h` | HTTP request parsing, route dispatch, and fallback 404 response |
+| `http_helper.c`, `http_helper.h` | Successful HTML response formatting and a 404 helper |
+| `worker_queue.c`, `worker_queue.h` | Linked queue of pending worker signals |
+| `types.h` | Configuration, route, and worker tracking structures |
+| `helper.c`, `helper.h` | Integer conversion and health-file naming helper |
+| `Makefile` | Compilation and linking |
+| `Dockerfile`, `run.sh` | Ubuntu development container |
+| `plan.md` | Early design notes |

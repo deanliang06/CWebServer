@@ -41,27 +41,27 @@ int init_signals() {
     return 0;
 }
 
-static void print_err(int err) {
-    char *string;
-    switch(err) {
-        case CONNECT_ERR:
-            string = "Please enter amount less than 50 and more than 0";
-            break;
-        case PIPE_READ_DEBUG:
-            string = "We are going to pipe";
-            break;
-        case SOCKET_READ:
-            string= "We are going to socket";
-            break;
-        case SOCKET_RESP:
-            string="We are done with sock";
-            break;
-        default:
-            string = "Unknown error occurred";
-    }
+// static void print_err(int err) {
+//     char *string;
+//     switch(err) {
+//         case CONNECT_ERR:
+//             string = "Please enter amount less than 50 and more than 0";
+//             break;
+//         case PIPE_READ_DEBUG:
+//             string = "We are going to pipe";
+//             break;
+//         case SOCKET_READ:
+//             string= "We are going to socket";
+//             break;
+//         case SOCKET_RESP:
+//             string="We are done with sock";
+//             break;
+//         default:
+//             string = "Unknown error occurred";
+//     }
 
-    printf("%s\n", string);
-}
+//     printf("%s\n", string);
+// }
 
 void handle_conn(int listen_fd, Config *cf) {
     int conn_fd = accept_conn(listen_fd);

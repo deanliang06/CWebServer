@@ -180,6 +180,55 @@ int start_server(int count, ...) {
 
     va_end(args);
     signal_shutdown_setup(0);
+    //no fork bc we want this to have head
+    start_loop(&cf, &running_stats);
+    return 0;
+}
+
+//forks so that user can kill server on same thread as spawn
+int start_server_no_head(int count, ...) {
+    if (count < 0 || count > 3) {
+        print_err(INC_NUM_ARGS);
+        return 1;
+    }
+
+    init_config_defaults(&cf);
+    
+    va_list args;
+    va_start(args, count);
+    
+    // Optional positional arguments: workers, polling timeout, worker lifetime.
+    for (int i = 0; i < count; i++) {
+        int arg = va_arg(args, int);
+        if (i == 0) {
+            if (arg > 0 && arg <= 50) {
+                cf.workers = arg;
+            } else {
+                print_err(WORKER_NUM_ERR);
+                va_end(args);
+                return 1;
+            }
+        } else if (i==1) {
+            if (arg >= 5 && arg <= 960) {
+                cf.timeout = arg;
+            } else {
+                print_err(WORKER_TIMEOUT_ERR);
+                va_end(args);
+                return 1;
+            }
+        } else {
+            if (arg >= 30 && arg <= 3600) {
+                cf.max_lifetime = arg;
+            } else {
+                print_err(WORKER_LIFE_ERR);
+                va_end(args);
+                return 1;
+            }
+        }
+    }
+
+    va_end(args);
+    signal_shutdown_setup(0);
     //fork so that framework thread isn't blocked by master loop
     int child_id = fork();
     if (!child_id) {
@@ -275,7 +324,7 @@ void kill_all(Running *run_stats) {
             if (errno != EINTR) break;
         }
     }
-
+    free(worker_pids);
     return;
 }
 
@@ -395,6 +444,7 @@ int kill_old_workers(Config *cf, Running *run_stats) {
 
 void kill_server(){
     kill(child_pid, SIGINT);
+    waitpid(child_pid, NULL, 0);
     return;
 }
 

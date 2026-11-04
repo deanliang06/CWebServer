@@ -15,7 +15,7 @@ char *format_get(char *body) {//users responsibility to null-terminate body
     int bytes = string_from_int(content_len_buf, len);
     printf("Bytes: %d", len);
 
-    char *buf = (char *)malloc(sizeof(char) *(FILLER_BYTES + bytes + len + template_len));
+    char *buf = (char *)malloc(sizeof(char) *(FILLER_BYTES + bytes + len + template_len + 1));
     memcpy(buf, start_template, template_len);
     memcpy(buf+template_len, "Content-Length: ", 16);
 
@@ -23,6 +23,7 @@ char *format_get(char *body) {//users responsibility to null-terminate body
     memcpy(buf+template_len+16, content_len_buf, bytes);
     memcpy(buf+template_len+16+bytes, "\r\n\r\n", 4);
     memcpy(buf+FILLER_BYTES+template_len+bytes, body, len);
+    buf[FILLER_BYTES+template_len+bytes+len] = '\0';
     return buf;
 }
 
