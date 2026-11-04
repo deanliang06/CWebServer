@@ -1,4 +1,9 @@
+#ifndef CWEB_TYPES_H
+#define CWEB_TYPES_H
+
 #include <time.h>
+
+struct Headers;
 
 typedef struct Config {
     int workers;
@@ -25,9 +30,11 @@ typedef struct Running {
 
 typedef struct Route {
     char *target;
-    char *(*f)(char *, char *);
+    char *(*f)(struct Headers *, char *);
     struct Route *next;
 } Route;
 typedef struct Routes {
     Route *head_route;
 } Routes;
+
+#endif

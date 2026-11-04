@@ -35,7 +35,7 @@ int init_signals() {
 
     memset(&new, 0, sizeof(sigaction));
     new.sa_handler = handle_signal;
-    new.sa_flags = SA_NODEFER;
+    new.sa_flags = 0;
 
     if (sigaction(SIGINT, &new, &old)) return -1;
     return 0;
@@ -132,10 +132,9 @@ void update_health(int health_fd) {
 void handle_queue() {
     while (!empty(&queue)) {
         int signal = pop_queue(&queue);
-        if (signal & SIGINT) health = 0;
+        if (signal == SIGINT) health = 0;
     }
 }
-
 
 void run_worker_loop(Config *cf, int health_fd, int pipe_fd, int listen_fd) {
     int timeout = cf->timeout;
@@ -157,24 +156,22 @@ void run_worker_loop(Config *cf, int health_fd, int pipe_fd, int listen_fd) {
         if (!num_fds_ready) continue;
         
         //check if wakeup (in this case process signals)
-        if (fds[1].revents & POLLIN) {
+        if (fds[1].revents & (POLLIN | POLLERR | POLLHUP)) {
             //process signals
             handle_queue();
-
-            print_err(PIPE_READ_DEBUG);
+        
             //clear buffer and reset revents
             char toRead = 0;
             read(pipe_fd, &toRead, 1);
             fds[1].revents = 0;
+            if (!health || fds[1].revents & (POLLERR | POLLHUP)) break;
         }
 
         if (fds[0].revents & POLLIN) {
             //connect to recieving port
-            print_err(SOCKET_READ);
-
             handle_conn(listen_fd, cf);
-            print_err(SOCKET_RESP);
             fds[0].revents = 0;
         }
+        sleep(5);
     }
 }

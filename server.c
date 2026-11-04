@@ -8,6 +8,8 @@
 #include <string.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <sys/wait.h>
+#include <errno.h>
 
 
 
@@ -15,6 +17,7 @@
 #include "helper.h"
 #include "socket.h"
 #include "workers.h"
+#include "request.h"
 
 #define INC_NUM_ARGS 1
 #define WORKER_NUM_ERR 2
@@ -36,11 +39,14 @@
 Config cf = {};
 Routes routes = {NULL};
 Running running_stats = {};
+
+
 int child_pid = -1;
+int terminated = 0;
 
 
 void start_loop(Config *cf, Running *run_stats); //main loop function
-void kill_all(Config *cf, Running *run_stats);
+void kill_all(Running *run_stats);
 
 void init_config_defaults(Config *cf) {
     cf->timeout = 30;
@@ -93,13 +99,19 @@ void printHelp() {
 
 
 void kill_all_signal(int signum) {
-    kill_all(&cf, &running_stats);
-    exit(1);
+    if (signum == SIGINT) {
+        terminated = 1;
+        kill_all(&running_stats);
+        exit(1);
+    }
 }
 
 void kill_child_signal(int signum) {
-    kill(child_pid, SIGINT);
-    exit(1);
+    if (signum == SIGINT) {
+        kill(child_pid, SIGINT);
+        waitpid(child_pid, NULL, 0);
+        exit(1);
+    }
 }
 
 
@@ -110,22 +122,18 @@ int signal_shutdown_setup(int parent) {
     memset(&new, 0, sizeof(sigaction));
     if (parent) new.sa_handler = kill_child_signal;
     else new.sa_handler = kill_all_signal;
-    new.sa_flags = SA_NODEFER;
+    new.sa_flags = 0;
 
     if (sigaction(SIGINT, &new, &old)) return -1;
     return 0;
 }
 
-int register_route(char *target, char* (*f)(char *, char *)) {
+int register_route(char *target, char* (*f)(Headers *, char *)) {
     Route *new_route = (Route *)malloc(sizeof(Route));
     new_route->f = f;
     new_route->next = routes.head_route;
     new_route->target = target;
     routes.head_route = new_route;
-}
-
-int kill_server() {
-    kill(child_pid, SIGINT);
     return 0;
 }
 
@@ -185,15 +193,17 @@ int start_server(int count, ...) {
     return 0;
 }
 
-void init_running(Running *rn) {
+int init_running(Running *rn) {
     rn->fds_opened = 0;
     rn->tail = NULL;
     rn->head = NULL;
     int listen_fd;
     if ((listen_fd = init_listen_socket()) < 0) {
         print_err(12+listen_fd);//for debugging
+        return -1;
     }
     rn->listen_socket = listen_fd;
+    return 0;
 }
 
 void close_worker(int health_fd, int signal_fd, int listen_fd) {
@@ -213,7 +223,7 @@ void close_other_fds(Running *run_stats, int fd_to_keep) {
     }
 }
 
-void kill_process_and_rm_list(Worker *proc, Running *run_stats) {
+int kill_process_and_rm_list(Worker *proc, Running *run_stats) {
     //not necessary to be thread safe
     Worker *prev = proc->prev;
     Worker *next = proc->next;
@@ -231,26 +241,51 @@ void kill_process_and_rm_list(Worker *proc, Running *run_stats) {
 
     kill(proc->proc_id, SIGINT);
     write(proc->signal_fd, "", 1);
+    int proc_to_wait = proc->proc_id;
+
     close(proc->running_fd);
     close(proc->signal_fd);
     free(proc);  
-    return;
+    return proc_to_wait;
 }
 
-void kill_all(Config *cf, Running *run_stats) {
+void kill_all(Running *run_stats) {
     Worker *head = run_stats->head;
+    int num_workers = 0;
+    
     while (head != NULL) {
-        kill_process_and_rm_list(head, run_stats);
+        num_workers++;
+        head = head->next;
+    }
+
+    int *worker_pids = (int *)malloc(sizeof(int)*num_workers);
+    
+    head = run_stats->head;
+    int idx = 0;
+    while (head != NULL) {
+        int proc = kill_process_and_rm_list(head, run_stats);
+        worker_pids[idx] = proc;
+        idx++;
         head = run_stats->head;
+    }
+
+
+    for (int i = 0; i < num_workers; i++) {
+        while (waitpid(worker_pids[i], NULL, 0) == -1) {
+            if (errno != EINTR) break;
+        }
     }
 
     return;
 }
 
+void clean_up_own_fds(Worker *work) {
+    close(work->running_fd);
+    close(work->signal_fd);
+}
+
 int init_worker(Config *cf, Running *run_stats) {
     //create the health file for seeing health patterns
-    char hfile_name[HEALTH_FILE_NAME_BUF];
-    init_hfile(hfile_name, run_stats->fds_opened);
     FILE * f = tmpfile();
     int health_fd = fileno(f);
 
@@ -287,7 +322,7 @@ int init_worker(Config *cf, Running *run_stats) {
         close(pipes[1]);
         close_other_fds(run_stats, health_fd);
         run_worker_loop(cf, health_fd, pipes[0], run_stats->listen_socket);
-        kill_process_and_rm_list(work, run_stats);
+        clean_up_own_fds(work);
         return WORKER;
     }
     run_stats->fds_opened++;
@@ -320,7 +355,7 @@ void safe_remove_last_accessed(Running *run_stats) {
         }
     }
 
-    kill_process_and_rm_list(head, run_stats);
+    kill_process_and_rm_list(min, run_stats);
 }
 
 int manage_worker_count(Config *cf, Running *run_stats) {
@@ -358,9 +393,14 @@ int kill_old_workers(Config *cf, Running *run_stats) {
     return 1;
 }
 
+void kill_server(){
+    kill(child_pid, SIGINT);
+    return;
+}
+
 void start_loop(Config *cf, Running *run_stats) {
-    init_running(run_stats);
-    while(1) {
+    if (init_running(run_stats)) return;
+    while(!terminated) {
         kill_old_workers(cf, run_stats);
         manage_worker_count(cf, run_stats);
         sleep(1);

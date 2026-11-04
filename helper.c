@@ -14,18 +14,23 @@ int int_from_string(char *string) {
     return num;    
 }
 
-void init_hfile(char *buf, int num_name) {
+int string_from_int(char *buf, int num) {
     int idx = 0;
-    if (num_name == 0) {
-        buf[0] = '0';
+    int replacement = num;
+
+    while(num != 0) {
+        num/=10;
         idx++;
     }
 
-    while (num_name > 0) {
-        int digit = num_name % 10;
-        num_name/=10;
-        buf[idx] = '0'+digit;
-        idx++;
+    int num_needed = idx;
+    buf[idx] = '\0';
+
+    while(idx) {
+        idx--;
+        buf[idx] = '0' + (replacement%10);
+        replacement/=10;
     }
-    memcpy(buf+idx, "health", 7);
+
+    return num_needed;
 }

@@ -1,3 +1,10 @@
+#ifndef CWEB_SERVER_H
+#define CWEB_SERVER_H
+
+#include "request.h"
+
 int start_server(int count, ...);
-int kill_server();
-int register_route(char *target, char* (*f)(char *, char *));
+void kill_server(void);
+int register_route(char *target, char* (*f)(Headers *, char *));
+
+#endif

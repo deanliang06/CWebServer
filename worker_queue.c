@@ -37,6 +37,6 @@ int pop_queue(SignalQueue *queue) {
 }
 
 int empty(SignalQueue *queue) {
-    if (queue->head) return 1;
-    return 0;
+    if (queue->head) return 0;
+    return 1;
 }

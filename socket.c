@@ -15,14 +15,20 @@ int init_listen_socket() {
     errno = 0;
     int sfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
 
+    //After all fds are closed the kernel still holds onto connection 
+    int reuse = 1;
+    setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
+
     if (errno == EACCES) {
         return -3;
     }
 
-
     if (bind(sfd, (struct sockaddr *)&adr, sizeof(adr))) {
+        perror("bind");
         return -2;
     }
+
 
     if (listen(sfd, 10)) {
         return -1;

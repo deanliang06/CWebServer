@@ -1,13 +1,15 @@
 #include "server.h"
+#include "http_helper.h"
 #include "unistd.h"
 
 
-char *get_health(char *method, char *body) {
-    return "HTTP/1.1 200 OK\r\n"
-    "Content-Length: 15\r\n\r\n"
-    "{\"health\":\"ok\"}\r\n\r\n";
+char *get_health(Headers *headers, char *req_body) {
+    char *body = "{\"health\": \"ok\"}";
+    char *response = format_get(body);
+    return response;
 }
-int main(int argc, char *argv[]) {
+
+int main() {
     register_route("/health", get_health);
     start_server(0);
     sleep(50);

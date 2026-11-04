@@ -1,9 +1,10 @@
-files=helper.o main.o server.o types.h workers.o socket.o request.o worker_queue.o
+files=helper.o main.o server.o workers.o socket.o request.o worker_queue.o http_helper.c
 CC=gcc
+CFLAGS=-Wall -Wextra
 
 
 server.exe : $(files)
-	$(CC) $^ -o $@ -Wall -Wextra
+	$(CC) $(files) -o $@
 
-%.o : %c %h
-	$(CC) $< -o $@
+%.o : %.c $(wildcard *.h)
+	$(CC) $(CFLAGS) -c $< -o $@

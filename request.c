@@ -4,31 +4,15 @@
 
 #include "helper.h"
 #include "types.h"
+#include "request.h"
 
 #define PROTOCOL_NOT_SUPPORTED ""
-
-typedef struct RequestLine {
-    char *method;
-    char *target;
-    char *protocol;
-} RequestLine;
 
 typedef enum {
     METHOD,
     TARGET,
     PROTOCOL
 } RequestIdx;
-
-typedef struct Headers {
-    RequestLine *req_line;
-    char *host;
-    char *content_type;
-    int content_length;
-    char *transfer_enc;
-    char *conn;
-    char *accept;
-    char *auth;
-} Headers;
 
 
 typedef enum {
@@ -172,7 +156,6 @@ Headers *parse_headers(char * full_req, int size) {
         }
     }
 
-    printf("Content_length: %d\n", req_config->content_length);
     req_config->req_line = req_line;
     return req_config;
 }
@@ -181,7 +164,7 @@ char *get_response(Config *cf, Headers *headers, char *body) {
     Route *head = cf->routes->head_route;
     while (head) {
         if (strcmp(headers->req_line->target, head->target)) {
-            char *resp = head->f(headers->req_line->method, body);
+            char *resp = head->f(headers, body);
             return resp;
         }
         head = head->next;

@@ -1,3 +1,8 @@
+#ifndef CWEB_REQUEST_H
+#define CWEB_REQUEST_H
+
+#include "types.h"
+
 typedef struct RequestLine {
     char *method;
     char *target;
@@ -22,3 +27,5 @@ char *get_response(Config *cf, Headers *headers, char *body);
 char *target_not_found_response();
 char *handle_request(char * fulRequest, int size);
 Headers *parse_headers(char * full_req, int size);
+
+#endif
