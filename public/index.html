@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>C Web Server | Static routing test</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">C WEB SERVER / STATIC ASSETS</p>
+      <h1>Hello from the public directory.</h1>
+      <p class="intro">If this page has a dark background, colorful cards, and three illustrations, your HTML, CSS, and nested image routes are loading.</p>
+    </header>
+    <section class="gallery" aria-label="Static image tests">
+      <article><img src="/images/mountains.svg" alt="Purple mountains beneath a golden sun" width="640" height="400"><div><span>01 / SVG</span><h2>Mountain morning</h2><a href="/images/mountains.svg">Open image directly &rarr;</a></div></article>
+      <article><img src="/images/orbit.svg" alt="A ringed mint planet in a starry sky" width="640" height="400"><div><span>02 / SVG</span><h2>Out of orbit</h2><a href="/images/orbit.svg">Open image directly &rarr;</a></div></article>
+      <article><img src="/images/waves.svg" alt="Layered blue ocean waves under a pink sky" width="640" height="400"><div><span>03 / SVG</span><h2>Making waves</h2><a href="/images/waves.svg">Open image directly &rarr;</a></div></article>
+    </section>
+    <section class="checks" aria-labelledby="checks-title">
+      <h2 id="checks-title">Try the routes</h2>
+      <p><a href="/index.html">/index.html</a><a href="/style.css">/style.css</a><a href="/images/mountains.svg">/images/mountains.svg</a><a href="/missing-file.html">Missing file (expect 404)</a></p>
+      <p class="hint">Open your browser's Network panel and reload to inspect each asset request. All assets are local; no internet connection is needed.</p>
+    </section>
+    <footer>Built to test a small server doing useful things.</footer>
+  </main>
+</body>
+</html>

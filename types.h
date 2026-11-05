@@ -30,6 +30,7 @@ typedef struct Running {
 
 typedef struct Route {
     char *target;
+    int wildcard;
     char *(*f)(struct Headers *, char *);
     struct Route *next;
 } Route;

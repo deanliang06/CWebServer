@@ -36,3 +36,20 @@ char *format_unsuccessful_get() {
     "\r\n"
     "Not Found";
 }
+
+char *method_not_allowed() {
+    return 
+    "HTTP/1.1 405 Method Not Allowed\r\n"
+    "Content-Length: 0\r\n"
+    "Connection: close\r\n"
+    "\r\n";
+}
+
+char *internal_server_error() {
+    return 
+    "HTTP/1.1 500 Internal Server Error\r\n"
+    "Content-Length: 0\r\n"
+    "Connection: close\r\n"
+    "\r\n";
+}
+

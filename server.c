@@ -18,6 +18,7 @@
 #include "socket.h"
 #include "workers.h"
 #include "request.h"
+#include "routing.h"
 
 #define INC_NUM_ARGS 1
 #define WORKER_NUM_ERR 2
@@ -37,7 +38,6 @@
 #define HEALTH_FILE_NAME_BUF 128
 
 Config cf = {};
-Routes routes = {NULL};
 Running running_stats = {};
 
 
@@ -54,6 +54,7 @@ void init_config_defaults(Config *cf) {
     cf->workers = 4;
     cf->routes = &routes;
 }
+
 void print_err(int err) {
     char *string;
     switch(err) {
@@ -128,15 +129,6 @@ int signal_shutdown_setup(int parent) {
     return 0;
 }
 
-int register_route(char *target, char* (*f)(Headers *, char *)) {
-    Route *new_route = (Route *)malloc(sizeof(Route));
-    new_route->f = f;
-    new_route->next = routes.head_route;
-    new_route->target = target;
-    routes.head_route = new_route;
-    return 0;
-}
-
 int start_server(int count, ...) {
     if (count < 0 || count > 3) {
         print_err(INC_NUM_ARGS);
@@ -144,7 +136,8 @@ int start_server(int count, ...) {
     }
 
     init_config_defaults(&cf);
-    
+    init_static_routes();
+
     va_list args;
     va_start(args, count);
     
@@ -193,7 +186,8 @@ int start_server_no_head(int count, ...) {
     }
 
     init_config_defaults(&cf);
-    
+    init_static_routes();
+
     va_list args;
     va_start(args, count);
     

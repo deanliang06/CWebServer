@@ -1,5 +1,6 @@
 #include "server.h"
 #include "http_helper.h"
+#include "routing.h"
 #include "unistd.h"
 
 char *get_home(Headers *headers, char *req_body) {

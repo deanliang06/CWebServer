@@ -163,10 +163,13 @@ Headers *parse_headers(char * full_req, int size) {
 char *get_response(Config *cf, Headers *headers, char *body) {
     Route *head = cf->routes->head_route;
     while (head) {
-        if (!strcmp(headers->req_line->target, head->target)) {
+        if (head->wildcard) {
+
+        } else if (!strcmp(headers->req_line->target, head->target)) {
             char *resp = head->f(headers, body);
             return resp;
         }
+
         head = head->next;
     }
     return NULL;
