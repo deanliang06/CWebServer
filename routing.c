@@ -21,7 +21,7 @@ char *handle_index_route(Headers *headers, char *body) {
 
 
     char *file_content = read_file("public/index.html");
-    return format_get(file_content);
+    return format_get_file(file_content, "public/index.html");
 }
 
 char *handle_style_route(Headers *headers, char *body) {
@@ -30,7 +30,7 @@ char *handle_style_route(Headers *headers, char *body) {
 
     
     char *file_content = read_file("public/style.css");
-    return format_get(file_content);
+    return format_get_file(file_content, "public/style.css");
 }
 
 char *handle_folder_route(Headers *headers, char *body) {
@@ -42,7 +42,7 @@ char *handle_folder_route(Headers *headers, char *body) {
     if (file_exists_and_content(path_requested) == FILE_NOT_FOUND) return format_unsuccessful_get();
 
     char *file_content = read_file(path_requested);
-    return format_get(file_content);
+    return format_get_file(file_content, path_requested);
 }
 
 void init_static_routes() {

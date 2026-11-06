@@ -14,6 +14,7 @@
 #include "types.h"
 #include "request.h"
 #include "worker_queue.h"
+#include "http_helper.h"
 
 #define INIT_REQUEST_SIZE 1024
 
@@ -112,11 +113,11 @@ void handle_conn(int listen_fd, Config *cf) {
         body = extract_body(buf, bufUsed,header_vals->content_length);
     }
     char *response = get_response(cf, header_vals, body);
-    if (!response) response = target_not_found_response();
+    if (!response) response = format_unsuccessful_get();
     send(conn_fd, response, strlen(response), MSG_DONTWAIT);
     close(conn_fd);
     
-    printf("%s\n", response);
+    // printf("%s\n", response);
     
     //will functionize this soon
     free(body);

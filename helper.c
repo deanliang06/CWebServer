@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <fcntl.h>  
 #include <sys/stat.h>
@@ -53,7 +54,7 @@ char *read_file(char *filename) {
 
     int bytes_read = 0;
     int buf_filled = 0;
-    while ((bytes_read = read(fd, buf, cur_size-buf_filled))) {
+    while ((bytes_read = read(fd, buf+bytes_read, cur_size-buf_filled))) {
         buf_filled+=bytes_read;
         if (buf_filled == cur_size) {
             cur_size*=2;
@@ -62,6 +63,7 @@ char *read_file(char *filename) {
             free(buf);
             buf = new_buf;
         }
+        buf[cur_size-1] = '\0';
     }
 
     close(fd);

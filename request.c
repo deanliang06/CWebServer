@@ -177,13 +177,3 @@ char *get_response(Config *cf, Headers *headers, char *body) {
     }
     return NULL;
 }
-
-char *target_not_found_response() {
-    return
-    "HTTP/1.1 404 Not Found\r\n"
-    "Content-Type: text/plain\r\n"
-    "Content-Length: 9\r\n"
-    "Connection: close\r\n"
-    "\r\n"
-    "Not Found";
-}
