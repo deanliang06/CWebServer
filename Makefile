@@ -1,4 +1,4 @@
-files=helper.o main.o server.o workers.o socket.o request.o worker_queue.o http_helper.c
+files=helper.o main.o server.o workers.o socket.o request.o worker_queue.o http_helper.c routing.c
 CC=gcc
 CFLAGS=-Wall -Wextra
 

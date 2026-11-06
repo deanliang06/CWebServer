@@ -13,7 +13,6 @@ char *format_get(char *body) {//users responsibility to null-terminate body
 
     char content_len_buf[BUF_SIZE];
     int bytes = string_from_int(content_len_buf, len);
-    printf("Bytes: %d", len);
 
     char *buf = (char *)malloc(sizeof(char) *(FILLER_BYTES + bytes + len + template_len + 1));
     memcpy(buf, start_template, template_len);
@@ -51,5 +50,26 @@ char *internal_server_error() {
     "Content-Length: 0\r\n"
     "Connection: close\r\n"
     "\r\n";
+}
+
+int check_get(char *method) {
+    int method_len = strlen(method);
+
+    int start_idx = 0;
+    for (int i = 0; i < method_len; i++) {
+        if (method[i] != ' ') break;
+        start_idx++;
+    }
+
+    char *get_string = "GET";
+    for (int i = 0; i < 3; i++) {
+        if (get_string[i] != method[start_idx+i]) return 0;
+    }
+
+    int it = start_idx+3;
+    while(method[it]) {
+        if (method[it] != ' ') return 0;
+    }
+    return 1;
 }
 

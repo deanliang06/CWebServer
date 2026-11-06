@@ -1,7 +1,9 @@
 #include <limits.h>
 #include <errno.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>  
 #include <sys/stat.h>
 
 #define BUFLEN 1024
@@ -43,7 +45,7 @@ int string_from_int(char *buf, int num) {
 char *read_file(char *filename) {
     errno = 0;
 
-    int fd = open(filename, "r");
+    int fd = open(filename, O_RDONLY);
     if (fd == -1 || errno != 0) return NULL;
 
     int cur_size = BUFLEN;
@@ -51,7 +53,7 @@ char *read_file(char *filename) {
 
     int bytes_read = 0;
     int buf_filled = 0;
-    while (bytes_read = read(fd, buf, cur_size-buf_filled)) {
+    while ((bytes_read = read(fd, buf, cur_size-buf_filled))) {
         buf_filled+=bytes_read;
         if (buf_filled == cur_size) {
             cur_size*=2;
