@@ -3,9 +3,9 @@
 #include "routing.h"
 
 
-char *get_health(Headers *headers, char *req_body) {
+Response *get_health(Headers *headers, char *req_body) {
     char *body = "{\"health\": \"ok\"}";
-    return format_get(body);
+    return format_get_text(body);
 }
 
 int main() {

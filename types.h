@@ -28,10 +28,16 @@ typedef struct Running {
     int listen_socket;
 } Running;
 
+typedef struct Response {
+    char *buf;
+    int size;
+    int capacity;
+} Response;
+
 typedef struct Route {
     char *target;
     int wildcard;
-    char *(*f)(struct Headers *, char *);
+    struct Response *(*f)(struct Headers *, char *);
     struct Route *next;
 } Route;
 typedef struct Routes {

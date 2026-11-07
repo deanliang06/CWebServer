@@ -9,14 +9,19 @@
 #include <poll.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <time.h>
+#include <errno.h>
 
 #include "socket.h"
 #include "types.h"
 #include "request.h"
 #include "worker_queue.h"
 #include "http_helper.h"
+#include "dyna_buffer.h"
 
 #define INIT_REQUEST_SIZE 1024
+#define RESP_PART 1024
+#define HEADER_MAX 16384
 
 #define CONNECT_ERR 10
 #define PIPE_READ_DEBUG 11
@@ -64,66 +69,124 @@ int init_signals() {
 //     printf("%s\n", string);
 // }
 
+void throw_error(int socket_fd) {
+    errno = 0;
+    Response *response = internal_server_error();
+    send(socket_fd, response->buf, response->size, MSG_DONTWAIT);
+    
+    if (errno) {
+        printf("There was an error even sending an internal error\n");
+    }
+}
+
+
 void handle_conn(int listen_fd, Config *cf) {
     int conn_fd = accept_conn(listen_fd);
     if (conn_fd == -1) return;
 
-    char *buf = (char *)malloc(sizeof(char) * INIT_REQUEST_SIZE);
-    int curBufSize = INIT_REQUEST_SIZE;
-
-    //track how many bytes per packet and sum over to see if
-    //need to incrase buffer size
-    int bufAdded = 0;
-    int bufUsed = 0;
+    struct timespec time = {};
+    clock_gettime(CLOCK_MONOTONIC, &time);
+    time_t start_time = time.tv_sec;
 
     //HTTP1.1 eventually
-    while (!end_of_header(buf, bufAdded)) {
-        bufAdded = read(conn_fd, buf+bufUsed, curBufSize-bufUsed);
-        //if we add the rest of the buf then allocate new buf with twice size
-        if (bufAdded == curBufSize-bufUsed) {
-            char *newBuf = (char *)malloc(sizeof(char) * curBufSize*2);
-            memcpy(newBuf, buf, curBufSize);
-            free(buf);
-            buf = newBuf;
-            curBufSize*=2;
-        }
-        bufUsed+=bufAdded;
-    }
+    char reuse_buf[INIT_REQUEST_SIZE];
+    Buffer *buf = create_buf(INIT_REQUEST_SIZE);
 
-    Headers *header_vals = parse_headers(buf, bufUsed);
+    while (!end_of_header(buf->buf, buf->size)) {
+        struct pollfd poll_struct = {conn_fd, POLLIN, 0};
+
+        int n = poll(&poll_struct, 1, 5000);
+
+        clock_gettime(CLOCK_MONOTONIC, &time);
+        if (start_time - time.tv_sec >= cf->timeout) {
+            throw_error(conn_fd);
+            free_dyna(buf);
+            return;
+        } else if (n == 0) {
+            continue;
+        }
+
+        int buf_added = read(conn_fd, reuse_buf, INIT_REQUEST_SIZE);
+
+        if (errno == EINTR) continue;
+
+        if (buf_added < 0 || buf->size > 16384) {
+            throw_error(conn_fd);
+            free_dyna(buf);
+            return;
+        }
+
+        add_to_buf(buf, reuse_buf, buf_added);
+    }
+    Headers *header_vals = parse_headers(buf->buf, buf->size);
+
+    errno = 0;
+    //put the body into buf if the content_length requires parsing
     if (header_vals->content_length)  {
         //read rest of body if there is body
-        buf[bufUsed] = '\0';
-        while (!body_enough(buf, bufUsed, header_vals->content_length)) {
-            bufAdded = read(conn_fd, buf+bufUsed, curBufSize-bufUsed);
-            //if we add the rest of the buf then allocate new buf with twice size
-            if (bufAdded == curBufSize-bufUsed) {
-                char *newBuf = (char *)malloc(sizeof(char) * curBufSize*2);
-                memcpy(newBuf, buf, curBufSize);
-                free(buf);
-                buf = newBuf;
-                curBufSize*=2;
+        while (!body_enough(buf->buf, buf->size, header_vals->content_length)) {
+
+            struct pollfd poll_struct = {conn_fd, POLLIN, 0};
+
+            int n = poll(&poll_struct, 1, 5000);
+
+            clock_gettime(CLOCK_MONOTONIC, &time);
+            if (start_time - time.tv_sec >= cf->timeout) {
+                throw_error(conn_fd);
+                free_dyna(buf);
+                return;
+            } else if (n == 0) {
+                continue;
             }
-            bufUsed+=bufAdded;
+
+
+            int buf_added = read(conn_fd, reuse_buf, INIT_REQUEST_SIZE);
+
+            if (errno == EINTR) continue;
+
+            if (buf_added < 0) {
+                throw_error(conn_fd);
+                free(header_vals->req_line);
+                free(header_vals);
+                free_dyna(buf);
+                return;
+            }
+            
+            add_to_buf(buf, reuse_buf, buf_added);
         }
     }
 
+    //extract the body
     char *body = NULL;
     if (header_vals->content_length) {
-        body = extract_body(buf, bufUsed,header_vals->content_length);
+        body = extract_body(buf->buf, buf->size,header_vals->content_length);
     }
-    char *response = get_response(cf, header_vals, body);
+
+    //get response given headers and body
+    Response *response = get_response(cf, header_vals, body);
+
+    //if the no route then not found output
     if (!response) response = format_unsuccessful_get();
-    send(conn_fd, response, strlen(response), MSG_DONTWAIT);
+
+    //send message in blocks so that it doesn't fail when too large
+    int resp_len = response->size;
+    int sent = 0;
+    while (resp_len > 0) {
+        send(conn_fd, response->buf+sent, (RESP_PART < resp_len) ? RESP_PART : resp_len, MSG_DONTWAIT);
+        resp_len-=RESP_PART;
+        sent+=RESP_PART;
+    }
+
+    //close the connection (lol)
     close(conn_fd);
-    
-    // printf("%s\n", response);
-    
-    //will functionize this soon
+        
+    //free all the things allocated in this function
     free(body);
     free(header_vals->req_line);
     free(header_vals);
-    free(buf);
+    free(response->buf);
+    free(response);
+    free_dyna(buf);    
 }
 
 void update_health(int health_fd) {
@@ -173,6 +236,5 @@ void run_worker_loop(Config *cf, int health_fd, int pipe_fd, int listen_fd) {
             handle_conn(listen_fd, cf);
             fds[0].revents = 0;
         }
-        sleep(5);
     }
 }

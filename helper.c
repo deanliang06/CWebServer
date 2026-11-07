@@ -7,6 +7,8 @@
 #include <fcntl.h>  
 #include <sys/stat.h>
 
+#include "dyna_buffer.h"
+
 #define BUFLEN 1024
 
 int int_from_string(char *string) {
@@ -49,25 +51,18 @@ char *read_file(char *filename) {
     int fd = open(filename, O_RDONLY);
     if (fd == -1 || errno != 0) return NULL;
 
-    int cur_size = BUFLEN;
-    char *buf = (char *)malloc(sizeof(char) * cur_size);
+    Buffer *buf = create_buf(BUFLEN);
 
     int bytes_read = 0;
-    int buf_filled = 0;
-    while ((bytes_read = read(fd, buf+bytes_read, cur_size-buf_filled))) {
-        buf_filled+=bytes_read;
-        if (buf_filled == cur_size) {
-            cur_size*=2;
-            char *new_buf = (char *)malloc(sizeof(char) * cur_size);
-            memcpy(new_buf, buf, cur_size/2);
-            free(buf);
-            buf = new_buf;
-        }
-        buf[cur_size-1] = '\0';
+    char per_line_buf[BUFLEN];
+    while ((bytes_read = read(fd, per_line_buf, BUFLEN))) {
+        add_to_buf(buf, per_line_buf, bytes_read);
     }
+    
+    add_null_term(buf);
 
     close(fd);
-    return buf;
+    return buf->buf;
 }
 
 int file_exists_and_content(char *file_path) {

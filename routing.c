@@ -13,9 +13,9 @@ Routes routes = {NULL};
 #define FILE_NOT_FOUND -1
 #define IS_DIR 0
 
-int register_route(char *target, char* (*f)(Headers *, char *), int wildcard);
+int register_route(char *target, Response* (*f)(Headers *, char *), int wildcard);
 
-char *handle_index_route(Headers *headers, char *body) {
+Response *handle_index_route(Headers *headers, char *body) {
     if (!check_get(headers->req_line->method)) return method_not_allowed();
     if (!file_exists_and_content("public/index.html")) return internal_server_error();
 
@@ -24,7 +24,7 @@ char *handle_index_route(Headers *headers, char *body) {
     return format_get_file(file_content, "public/index.html");
 }
 
-char *handle_style_route(Headers *headers, char *body) {
+Response *handle_style_route(Headers *headers, char *body) {
     if (!check_get(headers->req_line->method)) return method_not_allowed();
     if (!file_exists_and_content("public/style.css")) return format_unsuccessful_get();
 
@@ -33,7 +33,7 @@ char *handle_style_route(Headers *headers, char *body) {
     return format_get_file(file_content, "public/style.css");
 }
 
-char *handle_folder_route(Headers *headers, char *body) {
+Response *handle_folder_route(Headers *headers, char *body) {
     if (!check_get(headers->req_line->method)) return method_not_allowed();
 
     char *file_requested = headers->req_line->target;
@@ -51,7 +51,7 @@ void init_static_routes() {
     register_route("/images/", handle_folder_route, 1);
 }
 
-int register_route(char *target, char* (*f)(Headers *, char *), int wildcard) {
+int register_route(char *target, Response* (*f)(Headers *, char *), int wildcard) {
     Route *new_route = (Route *)malloc(sizeof(Route));
     new_route->f = f;
     new_route->next = routes.head_route;

@@ -44,7 +44,7 @@ Register routes before starting the server:
 #include "server.h"
 #include "http_helper.h"
 
-char *hello(Headers *headers, char *body) {
+Response *hello(Headers *headers, char *body) {
     (void)headers;
     (void)body;
     return format_get("<h1>Hello from C!</h1>");

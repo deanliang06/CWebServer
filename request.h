@@ -23,8 +23,7 @@ typedef struct Headers {
 int end_of_header(char *buf, int buf_size);
 int body_enough(char *buf, int buf_size, int body_len);
 char *extract_body(char *buf, int buf_len, int body_len);
-char *get_response(Config *cf, Headers *headers, char *body);
-char *handle_request(char * fulRequest, int size);
+Response *get_response(Config *cf, Headers *headers, char *body);
 Headers *parse_headers(char * full_req, int size);
 
 #endif

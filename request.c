@@ -5,6 +5,7 @@
 #include "helper.h"
 #include "types.h"
 #include "request.h"
+#include "dyna_buffer.h"
 
 #define PROTOCOL_NOT_SUPPORTED ""
 
@@ -104,7 +105,7 @@ void parse_header(Headers *req_config, char *buf, int len) {
             //therfore len-end_header_key
             char *header_val = (char *)malloc(sizeof(char) * len-end_header_key-1);
             memcpy(header_val, buf+end_header_key+2, len-end_header_key-2);
-            header_val[len-end_header_key-1] = '\0';
+            header_val[len-end_header_key-2] = '\0';
 
             if (i+3 == HOST) {
                 req_config->host = header_val;
@@ -160,18 +161,16 @@ Headers *parse_headers(char * full_req, int size) {
     return req_config;
 }
 
-char *get_response(Config *cf, Headers *headers, char *body) {
+Response *get_response(Config *cf, Headers *headers, char *body) {
     Route *head = cf->routes->head_route;
     while (head) {
         if (head->wildcard && matching_front(head->target, headers->req_line->target)) {
-            char *resp = head->f(headers, body);
+            Response *resp = head->f(headers, body);
             return resp;
         } else if (!strcmp(headers->req_line->target, head->target)) {
-            char *resp = head->f(headers, body);
+            Response *resp = head->f(headers, body);
             return resp;
         }
-
-        printf("Not same (%s and %s)\n", head->target, headers->req_line->target);
 
         head = head->next;
     }

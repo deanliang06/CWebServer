@@ -1,7 +1,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+
 #include "helper.h"
+#include "types.h"
 
 #define CONTENT_LINE_BYTES 20
 #define BUF_SIZE 128
@@ -15,27 +17,41 @@ enum file_type {
     svg,
 } file_type;
 
-char *format_get(char *body) {//users responsibility to null-terminate body
-    char *start_template = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n";
-    int len = strlen(body);
+Response *format_get_text(char *body) {//users responsibility to null-terminate body
+    //start which establishing closing of connection
+    char *start_template = "HTTP/1.1 200 OK\r\nContent-type: text/plain\r\nConnection: close\r\n";
     int template_len = strlen(start_template);
 
+    //get the string and num bytes for the length of body
+    int body_len = strlen(body);
+
     char content_len_buf[BUF_SIZE];
-    int bytes = string_from_int(content_len_buf, len);
+    int content_line_len = string_from_int(content_len_buf, body_len) + CONTENT_LINE_BYTES;
 
-    char *buf = (char *)malloc(sizeof(char) *(CONTENT_LINE_BYTES + bytes + len + template_len + 1));
+    //allocate buf for everything
+    char *buf = (char *)malloc(sizeof(char) *(template_len +content_line_len+body_len+1));
+
+    //copy template into buf first
     memcpy(buf, start_template, template_len);
+
+    //copy content len
     memcpy(buf+template_len, "Content-Length: ", 16);
+    memcpy(buf+template_len+16, content_len_buf, strlen(content_len_buf));
+    memcpy(buf+template_len+content_line_len-4, "\r\n\r\n", 4);
 
+    //copy body
+    memcpy(buf+template_len+content_line_len, body, body_len);
+    buf[template_len + content_line_len+body_len] = '\0';
 
-    memcpy(buf+template_len+16, content_len_buf, bytes);
-    memcpy(buf+template_len+16+bytes, "\r\n\r\n", 4);
-    memcpy(buf+CONTENT_LINE_BYTES+template_len+bytes, body, len);
-    buf[CONTENT_LINE_BYTES+template_len+bytes+len] = '\0';
-    return buf;
+    Response *resp = (Response *)malloc(sizeof(Response));
+    resp->buf = buf;
+    resp->capacity = template_len +content_line_len+body_len+1;
+    resp->size = template_len +content_line_len+body_len;
+
+    return resp;
 }
 
-char *format_get_file(char *body, char *file_name) {//users responsibility to null-terminate body
+Response *format_get_file(char *body, char *file_name) {//users responsibility to null-terminate body
 
     //get which mime type
     enum file_type f = -1;
@@ -97,7 +113,7 @@ char *format_get_file(char *body, char *file_name) {//users responsibility to nu
 
 
     //allocate buf for everything
-    char *buf = (char *)malloc(sizeof(char) *(template_len + mime_line_len+content_line_len+body_len+1));
+    char *buf = (char *)malloc(sizeof(char) *(template_len + mime_line_len+content_line_len+body_len));
 
     //copy template into buf first
     memcpy(buf, start_template, template_len);
@@ -113,35 +129,52 @@ char *format_get_file(char *body, char *file_name) {//users responsibility to nu
 
     //copy body
     memcpy(buf+template_len+mime_line_len+content_line_len, body, body_len);
-    buf[template_len + mime_line_len+content_line_len+body_len] = '\0';
-    // printf("Returned resp %s\n", buf);
-    return buf;
+
+    //put in thing
+    Response *resp = (Response *)malloc(sizeof(Response));
+    resp->buf = buf;
+    resp->capacity = template_len+mime_line_len+content_line_len+body_len;
+    resp->size = template_len+mime_line_len+content_line_len+body_len;
+
+    return resp;
 }
 
-char *format_unsuccessful_get() {
-    return 
-    "HTTP/1.1 404 Not Found\r\n"
+Response *format_unsuccessful_get() {
+    Response *resp = (Response *)malloc(sizeof(Response));
+    resp->buf = "HTTP/1.1 404 Not Found\r\n"
     "Content-Type: text/plain\r\n"
     "Content-Length: 9\r\n"
     "Connection: close\r\n"
     "\r\n"
     "Not Found";
+
+    resp->capacity = strlen(resp->buf) + 1;
+    resp->size = resp->capacity;
+    return resp;
 }
 
-char *method_not_allowed() {
-    return 
-    "HTTP/1.1 405 Method Not Allowed\r\n"
+Response *method_not_allowed() {
+    Response *resp = (Response *)malloc(sizeof(Response));
+    resp->buf =  "HTTP/1.1 405 Method Not Allowed\r\n"
     "Content-Length: 0\r\n"
     "Connection: close\r\n"
     "\r\n";
+
+    resp->capacity = strlen(resp->buf) + 1;
+    resp->size = resp->capacity;
+    return resp;
 }
 
-char *internal_server_error() {
-    return 
-    "HTTP/1.1 500 Internal Server Error\r\n"
+Response *internal_server_error() {
+    Response *resp = (Response *)malloc(sizeof(Response));
+    resp->buf =      "HTTP/1.1 500 Internal Server Error\r\n"
     "Content-Length: 0\r\n"
     "Connection: close\r\n"
     "\r\n";
+
+    resp->capacity = strlen(resp->buf) + 1;
+    resp->size = resp->capacity;
+    return resp;
 }
 
 int check_get(char *method) {
