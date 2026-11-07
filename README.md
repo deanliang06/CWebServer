@@ -88,7 +88,7 @@ These are short, same-host measurements: the Python load generator exceeded 80% 
 
 ## Known limitations
 
-This remains a learning server, not a hardened internet service. TLS, persistent connections, HTTP/2, HEAD, range requests, compression, caching validators/304, and structured access logging are absent. 
+This is still not a hardened internet service. TLS, persistent connections, HTTP/2, HEAD, range requests, compression, caching validators/304, and structured access logging are absent. 
 
 Worker-reduction health scan can hang. Signal setup uses `sizeof(sigaction)` instead of the structure size. Performance tests do not certify security or shutdown correctness.
 
