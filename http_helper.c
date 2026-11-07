@@ -81,7 +81,11 @@ Response *format_get_file(Buffer *body, char *file_name) {//users responsibility
 
 
     //second part which establishes content type buffer
-    if (f == -1) return NULL;
+    if (f == -1) {
+        free_dyna(body);
+        free(file_name);
+        return NULL;
+    }
 
     char *content_type_beg;
     if (f < 3) {
@@ -138,6 +142,7 @@ Response *format_get_file(Buffer *body, char *file_name) {//users responsibility
     resp->size = template_len+mime_line_len+content_line_len+body_len;
 
     free_dyna(body);
+    free(file_name);
     return resp;
 }
 

@@ -1,160 +1,124 @@
 ﻿# CWebServer
 
-An experimental HTTP/1.1 server and small routing framework written in C. A supervisor creates a pool of worker processes sharing a TCP listener. Workers use `poll()` for connection readiness and a per-worker pipe for signal wakeups.
-
-The example application serves an HTML welcome page at `/`, a health response at `/health`, and a plain-text 404 for unmatched targets. This is a learning project; HTTP parsing, shutdown, and resource management are still incomplete.
-
-## Requirements
-
-- Linux with GCC and Make, including POSIX process, signal, socket, and polling APIs.
-- On Windows, use WSL or the included Docker development environment.
-
-Despite its name, `server.exe` is a Linux executable when built in Linux. It is not a native Windows program.
+An HTTP/1.1 server and routing framework written in C for Linux. A supervisor forks four workers by default, sharing one TCP listener. Each worker handles one connection at a time and closes it after its response.
 
 ## Build and run
 
-From the repository root in a Linux shell:
+Requires Linux, GCC and Make (Windows users can use WSL). Run from the repository root:
 
 ```sh
 make
 ./server.exe
-```
-
-The server listens on **all IPv4 interfaces, port 8000**, with a listen backlog of 10. The current `main.c` calls the blocking `start_server(0)` function, so the application stays in the supervisor loop until shutdown.
-
-Try these manual checks from another terminal:
-
-```sh
 curl --http1.1 -i http://localhost:8000/
 curl --http1.1 -i http://localhost:8000/health
-curl --http1.1 -i http://localhost:8000/missing
 ```
 
-The root route returns HTML containing “Hello from C!”. The health route returns `{"health": "ok"}`. Both use `format_get()`, which currently labels every successful response `Content-Type: text/html`, including the health response.
+The executable listens on all IPv4 interfaces on **port 8000**, backlog 10. Despite its extension, `server.exe` is a Linux executable. The example has no command-line option parser. Ctrl+C requests shutdown; coordinated SIGTERM shutdown is not implemented.
 
-Use Ctrl+C (`SIGINT`) to request shutdown. SIGTERM does not currently have a coordinated shutdown handler. These commands are manual checks, not an automated test suite or a guarantee of reliable shutdown.
+## Current functionality
 
-The Makefile recompiles object files when their source or any project header changes. It does not generate `.d` dependency files.
+- Static GET requests resolve against the hardcoded `public` directory in the working directory. `/` resolves to `public/index.html`, `/style.css` to `public/style.css`, and `/images/profile.png` to `public/images/profile.png`.
+- Static resolution runs before application routes. If it produces no response, exact target matching checks the route list. The latest duplicate registration wins. Query strings are not stripped or parsed; URL percent decoding is not implemented.
+- The example registers `/health`, returning `{"health": "ok"}` as `text/plain` using `format_get_text()`.
+- Responses use `Response { char *buf; int size; int capacity; }`. Workers send the explicit byte count and advance by successful partial writes. Static bodies use `Buffer.size`, preserving embedded zero bytes.
+- MIME mappings cover HTML, CSS, JavaScript, PNG and SVG. Extension matching still needs correction; unsupported extensions produce no static response rather than an octet-stream fallback.
+- Requests accumulate across reads in growable buffers. Parsing expects HTTP/1.1 and recognizes Host, Content-Type, Content-Length, Transfer-Encoding, Connection, Accept and Authorization. Transfer-Encoding is rejected; chunked decoding is unavailable.
+- Header collection rejects more than 16 KiB of accumulated bytes, which may include an initial body portion. Additional body collection rejects more than 100,000 total buffered bytes. Incomplete requests at EOF are treated as errors.
+- Reads/writes poll for readiness and check elapsed monotonic time. Timeouts are approximate: polls use five-second intervals, accepted sockets remain blocking, and sending starts a separate timeout budget.
+- Responses include 200, 404, 405 and 500 statuses. Most request errors currently use 500 rather than specific client-error statuses.
+- Path resolution rejects literal `..` components and uses `lstat()` to reject existing symlink directories/files. 
 
-## Framework interface
-
-Register routes before starting the server:
+## Framework API
 
 ```c
 #include "server.h"
+#include "routing.h"
 #include "http_helper.h"
 
 Response *hello(Headers *headers, char *body) {
     (void)headers;
     (void)body;
-    return format_get("<h1>Hello from C!</h1>");
+    return format_get_text("Hello from C!");
 }
 
 int main(void) {
-    register_route("/", hello);
+    register_route("/hello", hello, 0);
     return start_server(0);
 }
 ```
 
-Callbacks have the signature `char *handler(Headers *headers, char *body)`. They receive parsed request metadata and an extracted body, or `NULL` when no body was collected. The request method, target, and protocol are available through `headers->req_line`.
+Callbacks receive parsed metadata and an allocated body, or NULL when no body was collected. Return a heap-allocated response with a heap-allocated buffer; the worker frees both. Callback request arguments belong to the worker. `format_get_file()` consumes its heap-allocated Buffer and filename.
 
-A callback returns a complete, null-terminated HTTP response. `format_get()` allocates a 200 OK response with a content length and HTML content type. The worker sends the response and closes the client connection. Response ownership is not fully implemented: the worker currently does not free responses allocated by `format_get()`.
-
-Routing compares the complete request target with `strcmp()`. It does not distinguish methods, extract query parameters, or support path parameters. For example, `/health?check=1` does not match `/health`. Routes are prepended to a list, so the most recently registered duplicate target wins. Registering routes after workers have forked does not update their inherited copies.
-
-### Configuration
-
-`start_server(count, ...)` accepts zero to three positional integer settings. `count` specifies how many follow it:
+Register routes before startup, since workers inherit their route list when forked. Configuration accepts up to three positional integers:
 
 ```c
-start_server(0);              /* Defaults. */
-start_server(1, 2);           /* Two workers. */
-start_server(3, 4, 30, 120);   /* Workers, poll timeout, worker lifetime. */
+start_server(0);              /* defaults */
+start_server(1, 2);           /* two workers */
+start_server(3, 4, 30, 120);   /* workers, timeout seconds, lifetime seconds */
 ```
 
 | Setting | Default | Accepted range |
-| --- | --- | --- |
-| Worker count | 4 | 1–50 |
-| Worker polling timeout | 30 seconds | 5–960 seconds |
-| Maximum worker lifetime | 120 seconds | 30–3600 seconds |
+|---|---:|---:|
+| Workers | 4 | 1-50 |
+| Timeout | 30 s | 5-960 s |
+| Worker lifetime | 120 s | 30-3600 s |
 
-The polling timeout is not a client request deadline. The supervisor checks worker lifetimes and its tracked worker count approximately once per second. The example does not parse command-line arguments; the old `-n`, `-t`, and `-l` usage text in `server.c` is stale.
+`start_server_no_head()` forks a supervisor and returns. `kill_server()` is intended only for that background mode
 
-### Background startup
+## Benchmarks
 
-`server.c` also implements `start_server_no_head(count, ...)`, which forks a supervisor and returns to the caller. `kill_server()` sends SIGINT to that supervisor and waits for it.
+Compared with NGINX 1.28.3 and lighttpd 1.4.82 on Linux under WSL2. All servers used four workers, identical static files, warm filesystem caches, and one request per connection, with compression and access logging disabled. CWebServer was compiled with GCC 15.2.0 and `-O2`.
 
-The example uses blocking startup and does not exercise this interface. `kill_server()` is intended for the background mode; blocking startup leaves `child_pid` at `-1`, so calling it in that mode can signal unrelated permitted processes.
+The tables show medians across three 3-second runs after a 0.5-second warmup, at **four concurrent clients**. p95 is the median of each run's p95 latency.
 
-## Request processing
+| File size | Server | Successful requests/s | p95 latency | Requests/CPU-second | Peak RSS |
+|---|---|---:|---:|---:|---:|
+| 1 KiB | CWebServer | 8,221 | 0.55 ms | 24,657 | 4.62 MiB |
+| 1 KiB | NGINX | 9,298 | 0.49 ms | 49,332 | 20.48 MiB |
+| 1 KiB | lighttpd | 7,191 | 0.58 ms | 25,022 | 6.94 MiB |
+| 100 KiB | CWebServer | 6,464 | 0.68 ms | 5,513 | 5.87 MiB |
+| 100 KiB | NGINX | 7,832 | 0.56 ms | 28,537 | 20.73 MiB |
+| 100 KiB | lighttpd | 5,941 | 0.68 ms | 16,958 | 6.94 MiB |
 
-- The shared listening socket is nonblocking; accepted client sockets use blocking reads.
-- Each worker handles one accepted connection at a time. Request buffers start at 1024 bytes and grow as needed.
-- Parsing expects HTTP/1.1 and recognizes `Host`, `Content-Type`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Accept`, and `Authorization`. Header names are compared without case sensitivity, and parsing assumes a space after the colon.
-- A nonzero `Content-Length` triggers body collection. Chunked decoding, persistent connections, TLS, and static-file serving are not implemented.
-- Each connection receives one response and is closed. Sending currently uses one nonblocking `send()` without retrying partial writes.
+Across the full matrix (1 KiB and 100 KiB files; concurrency 1, 4 and 16), **54 measured runs completed with zero request errors**. Every response was checked for status, content length and exact body bytes. A separate binary fixture checked embedded zero-byte transfer integrity.
 
-## Worker lifecycle and shutdown
+CWebServer used less aggregate resident memory in these runs, but more CPU per request than the production servers, especially for larger files. Higher requests/CPU-second means better CPU efficiency. RSS sums all server processes and counts shared pages more than once.
 
-Before forking each worker, the supervisor creates an anonymous temporary health file and a pipe. The worker inherits the listener, keeps its pipe read end, and updates the health file timestamps after `poll()` returns, including on timeouts.
+These are short, same-host measurements: the Python load generator exceeded 80% of one CPU core in 50 of 54 runs, so throughput may be client-limited.  See the [full comparison](benchmarks/results/COMPARISON.md) and [individual measurements](benchmarks/results/RESULTS.md).
 
-Lifetime expiration sends SIGINT and a pipe wakeup, removes the worker from the tracking list, and allows a replacement to be created. For full shutdown, `kill_all()` signals and wakes all tracked workers first, then waits for each PID with `waitpid()`, retrying interrupted waits. Worker-side cleanup no longer calls the supervisor's worker-killing function.
+## Known limitations
 
-Graceful shutdown remains unfinished:
+This remains a learning server, not a hardened internet service. TLS, persistent connections, HTTP/2, HEAD, range requests, compression, caching validators/304, and structured access logging are absent. 
 
-- Shutdown cleanup still runs inside the supervisor's signal handler and uses operations such as allocation and freeing. Workers also allocate queue nodes inside their signal handler.
-- An idle or incomplete client connection can trap a worker in its blocking read loops. EOF and read errors are not handled, so the supervisor can wait indefinitely for that worker.
-- The worker checks pipe hangup/error flags after clearing `revents`, so that check cannot independently trigger an exit. Queue processing still determines whether it stops.
-- The worker loop contains a five-second sleep after processing events, which delays further work and can delay shutdown.
-- Lifetime-based removals do not reap their children. Unexpected child exits are not detected by the tracked worker-count check.
-
-## Other current limitations
-
-- Header completion uses the latest read length instead of the total buffered length. Requests split across reads may stall. There are no request size limits or read deadlines.
-- Header-value termination writes past its allocation. Missing header fields are not consistently initialized, and parser failures can reach unchecked null pointers in the worker.
-- Parsed strings, response buffers, and popped signal queue nodes are not fully freed. Allocation, fork, pipe, and temporary-file failures need stronger handling.
-- Worker-count reduction does not advance its health-file scan iterator and can hang; selection can also leave no worker to remove.
-- Signal setup still uses `sizeof(sigaction)` instead of the intended structure size, such as `sizeof(new)`. GCC accepts this as an extension; it is not a correct portable structure initialization expression.
+Worker-reduction health scan can hang. Signal setup uses `sizeof(sigaction)` instead of the structure size. Performance tests do not certify security or shutdown correctness.
 
 ## Docker development environment
 
-The Dockerfile installs Bash, GCC, Make, and curl on Ubuntu 24.04. It starts a shell; it does not build or launch the application automatically.
-
-From Bash:
+The Dockerfile provides Ubuntu 24.04, GCC, Make, Bash and curl. It starts a shell rather than building or launching the application:
 
 ```sh
-bash run.sh
-```
-
-Or run the commands directly:
-
-```sh
-docker build -t ubuntu .
-docker run -it --rm -v "${PWD}:/app" -w /app -p 8000:8000 ubuntu
-```
-
-Inside the container:
-
-```sh
+docker build -t cwebserver-dev .
+docker run -it --rm -v "${PWD}:/app" -w /app -p 8000:8000 cwebserver-dev
+# Inside the container:
 make
 ./server.exe
 ```
 
-The repository is mounted at `/app`, and port 8000 is published to the host.
+Benchmarking additionally needs Python 3.11+ and optional comparison-server binaries; these are not included in the development image.
 
 ## Source layout
 
 | Files | Role |
-| --- | --- |
-| `main.c` | Example HTML and health routes; blocking server startup |
-| `server.c`, `server.h` | Route registration, configuration, supervisor loop, worker creation, and shutdown |
-| `socket.c`, `socket.h` | TCP listener setup and connection acceptance |
-| `workers.c`, `workers.h` | Worker polling, request buffering, signal processing, and health updates |
-| `request.c`, `request.h` | HTTP request parsing, route dispatch, and fallback 404 response |
-| `http_helper.c`, `http_helper.h` | Successful HTML response formatting and a 404 helper |
-| `worker_queue.c`, `worker_queue.h` | Linked queue of pending worker signals |
-| `types.h` | Configuration, route, and worker tracking structures |
-| `helper.c`, `helper.h` | Integer conversion and health-file naming helper |
-| `Makefile` | Compilation and linking |
-| `Dockerfile`, `run.sh` | Ubuntu development container |
-| `plan.md` | Early design notes |
+|---|---|
+| main.c | Example health route and startup |
+| server.c / server.h | Supervisor, configuration and worker lifecycle |
+| socket.c / socket.h | Listener and acceptance |
+| workers.c / workers.h | Connection reads, polling, writes and cleanup |
+| request.c / request.h | HTTP parsing, dispatch and request cleanup |
+| routing.c / routing.h | Static serving and route registration |
+| http_helper.c / http_helper.h | Response formatting and MIME selection |
+| helper.c / helper.h | File/path operations and integer conversion |
+| dyna_buffer.c / dyna_buffer.h | Growable byte buffers |
+| worker_queue.c / worker_queue.h | Pending signal queue |
+| types.h | Configuration, worker, response and route types |
+| benchmarks/ | Performance suite, harness tests and comparison results |

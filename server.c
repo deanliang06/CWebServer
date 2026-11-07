@@ -136,7 +136,6 @@ int start_server(int count, ...) {
     }
 
     init_config_defaults(&cf);
-    init_static_routes();
 
     va_list args;
     va_start(args, count);
@@ -186,7 +185,6 @@ int start_server_no_head(int count, ...) {
     }
 
     init_config_defaults(&cf);
-    init_static_routes();
 
     va_list args;
     va_start(args, count);

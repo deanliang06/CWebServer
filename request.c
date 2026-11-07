@@ -5,7 +5,7 @@
 #include "helper.h"
 #include "types.h"
 #include "request.h"
-#include "dyna_buffer.h"
+#include "routing.h"
 
 #define PROTOCOL_NOT_SUPPORTED ""
 
@@ -188,12 +188,13 @@ Headers *parse_headers(char * full_req, int size) {
 }
 
 Response *get_response(Config *cf, Headers *headers, char *body) {
+    Response *resp = serve_static(headers);
+    if (resp) return resp;
+
     Route *head = cf->routes->head_route;
     while (head) {
-        if (head->wildcard && matching_front(head->target, headers->req_line->target)) {
-            Response *resp = head->f(headers, body);
-            return resp;
-        } else if (!strcmp(headers->req_line->target, head->target)) {
+        //test if static file can serve
+        if (!strcmp(headers->req_line->target, head->target)) {
             Response *resp = head->f(headers, body);
             return resp;
         }

@@ -11,48 +11,40 @@
 
 Routes routes = {NULL};
 
-#define FILE_NOT_FOUND -1
-#define IS_DIR 0
+char *resolve_root(char *target) {
+    int target_len = strlen(target);
 
-int register_route(char *target, Response* (*f)(Headers *, char *), int wildcard);
+    char *root = "/";
+    for (int i = 0; i < target_len+1; i++) {
+        if (target[i] != root[i]) {
+            return target;
+        }
+    }
 
-Response *handle_index_route(Headers *headers, char *body) {
-    if (!check_get(headers->req_line->method)) return method_not_allowed();
-    if (!file_exists_and_content("public/index.html")) return internal_server_error();
-
-
-    Buffer *file_content = read_file("public/index.html");
-    if (!file_content) return internal_server_error();
-    return format_get_file(file_content, "public/index.html");
+    //if exits we know it is index.html
+    char *index = (char *)malloc(sizeof(char) * 12);
+    memcpy(index, "/index.html", 12);
+    return index;
 }
 
-Response *handle_style_route(Headers *headers, char *body) {
-    if (!check_get(headers->req_line->method)) return method_not_allowed();
-    if (!file_exists_and_content("public/style.css")) return format_unsuccessful_get();
-
-    
-    Buffer *file_content = read_file("public/style.css");
-    if (!file_content) return internal_server_error();
-    return format_get_file(file_content, "public/style.css");
-}
-
-Response *handle_folder_route(Headers *headers, char *body) {
+Response *serve_static(Headers *headers) {
     if (!check_get(headers->req_line->method)) return method_not_allowed();
 
     char *file_requested = headers->req_line->target;
-    char *path_requested = request_file_to_path(file_requested);
+
+    //only one rule is if they request '/' then it is resolved to index.html
+    char *resolved_file = resolve_root(file_requested);
+
+    char *requested_path = request_file_to_path(resolved_file);
+    if (!requested_path) return NULL;
     
-    if (file_exists_and_content(path_requested) == FILE_NOT_FOUND) return format_unsuccessful_get();
+    Buffer *file_content = read_file(requested_path);
 
-    Buffer *file_content = read_file(path_requested);
-    if (!file_content) return internal_server_error();
-    return format_get_file(file_content, path_requested);
-}
-
-void init_static_routes() {
-    register_route("/", handle_index_route, 0);
-    register_route("/style.css", handle_style_route, 0);
-    register_route("/images/", handle_folder_route, 1);
+    if (!file_content) {
+        free(requested_path);
+        return internal_server_error();
+    }
+    return format_get_file(file_content, requested_path);
 }
 
 int register_route(char *target, Response* (*f)(Headers *, char *), int wildcard) {

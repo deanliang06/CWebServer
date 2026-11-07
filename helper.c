@@ -1,11 +1,15 @@
 #include <limits.h>
 #include <errno.h>
-#include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>  
 #include <sys/stat.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <dirent.h>
+#include <sys/types.h>
+
 
 #include "helper.h"
 
@@ -57,6 +61,7 @@ Buffer *read_file(char *filename) {
     char per_line_buf[BUFLEN];
     while ((bytes_read = read(fd, per_line_buf, BUFLEN))) {
         if (bytes_read < 0) {
+            free_dyna(buf);
             close(fd);
             return NULL;
         }
@@ -79,15 +84,97 @@ int file_exists_and_content(char *file_path) {
     return 1;
 }
 
+int is_dir(char *file_path) {
+    struct stat st = {};
+    lstat(file_path, &st);
+    if (S_ISDIR(st.st_mode) && !S_ISLNK(st.st_mode)) return 1;
+    return 0;
+}
+
+int is_reg_file(char *file_path) {
+    struct stat st = {};
+    lstat(file_path, &st);
+    if (!S_ISLNK(st.st_mode) && S_ISREG(st.st_mode)) return 1;
+    return 0;
+}
+
+int parent_dir(char *file_name) {
+    int file_len = strlen(file_name);
+    char *parent = "..";
+    for (int i = 0; i < file_len+1; i++) {
+        if (file_name[i] != parent[i]) return 0;
+    }
+    return 1;
+}
+
 char *request_file_to_path(char *requested_file) {
     int req_len = strlen(requested_file);
-    int bytes_for_public = 7;
-
-    char *new_buf = (char *)malloc(sizeof(char)*(req_len+bytes_for_public));
-    memcpy(new_buf, "public", 6);
-    memcpy(new_buf+bytes_for_public-1, requested_file, req_len+1);
     
-    return new_buf;
+    Buffer *next_file = create_buf(BUFLEN);
+    int added_target = 6;
+    add_to_buf(next_file, "public", 7);
+
+    int base = 1;
+    for (int i = 1; i < req_len + 1; i++) {
+        if (requested_file[i] == '/' || i == req_len) {
+            //for file nav
+            if (!is_dir(next_file->buf)) {
+                free_dyna(next_file);
+                return NULL;
+            }
+
+            DIR *dir = opendir(next_file->buf);
+            if (!dir) {
+                free_dyna(next_file);
+                return NULL;
+            }
+
+            char *file = (char *)malloc(sizeof(char) * (i-base+1));
+            memcpy(file, requested_file+base, i-base);
+            file[i-base] = '\0';
+
+            if (parent_dir(file)) {
+                closedir(dir);
+                free_dyna(next_file);
+                free(file);
+                return NULL;
+            }
+
+            struct dirent *dir_struct;
+            int found = 0;
+            while ((dir_struct = readdir(dir))) {
+                if (!strcmp(dir_struct->d_name, file)) {
+                    //add the next file in the chain to the shit
+                    next_file->buf[added_target] = '/';
+                    added_target+=1;
+                    add_to_buf(next_file, file, i-base+1);
+                    added_target+=i-base;
+
+                    found = 1;
+                    break;
+                }
+            }
+
+            base = i+1;
+            free(file);
+            closedir(dir);
+
+            if (!found){
+                free_dyna(next_file);
+                return NULL;
+            }
+        }
+    }
+
+    if (!is_reg_file(next_file->buf)) {
+        free_dyna(next_file);
+        return NULL;
+    } 
+
+    char *reg_buf = (char *)malloc(sizeof(char)*(next_file->size));
+    memcpy(reg_buf, next_file->buf, next_file->size);
+    free_dyna(next_file);
+    return reg_buf;
 }
 
 int matching_front(char *wildcard, char *requested_resource) {

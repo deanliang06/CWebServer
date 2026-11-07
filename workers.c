@@ -252,7 +252,7 @@ void run_worker_loop(Config *cf, int health_fd, int pipe_fd, int listen_fd) {
     fds[1] = wakeup;
 
     while (health) {
-        //wait on 
+        //wait on fds beign readable
         int num_fds_ready = poll(fds, 2, timeout*1000);
         update_health(health_fd);       
         if (!num_fds_ready) continue;
