@@ -7,7 +7,7 @@
 #include <fcntl.h>  
 #include <sys/stat.h>
 
-#include "dyna_buffer.h"
+#include "helper.h"
 
 #define BUFLEN 1024
 
@@ -45,7 +45,7 @@ int string_from_int(char *buf, int num) {
     return num_needed;
 }
 
-char *read_file(char *filename) {
+Buffer *read_file(char *filename) {
     errno = 0;
 
     int fd = open(filename, O_RDONLY);
@@ -56,13 +56,17 @@ char *read_file(char *filename) {
     int bytes_read = 0;
     char per_line_buf[BUFLEN];
     while ((bytes_read = read(fd, per_line_buf, BUFLEN))) {
+        if (bytes_read < 0) {
+            close(fd);
+            return NULL;
+        }
         add_to_buf(buf, per_line_buf, bytes_read);
     }
     
     add_null_term(buf);
-
+    
     close(fd);
-    return buf->buf;
+    return buf;
 }
 
 int file_exists_and_content(char *file_path) {

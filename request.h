@@ -25,5 +25,5 @@ int body_enough(char *buf, int buf_size, int body_len);
 char *extract_body(char *buf, int buf_len, int body_len);
 Response *get_response(Config *cf, Headers *headers, char *body);
 Headers *parse_headers(char * full_req, int size);
-
+void free_header(Headers *header);
 #endif

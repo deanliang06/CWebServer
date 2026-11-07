@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "helper.h"
+#include "dyna_buffer.h"
 #include "types.h"
 
 #define CONTENT_LINE_BYTES 20
@@ -51,7 +52,7 @@ Response *format_get_text(char *body) {//users responsibility to null-terminate 
     return resp;
 }
 
-Response *format_get_file(char *body, char *file_name) {//users responsibility to null-terminate body
+Response *format_get_file(Buffer *body, char *file_name) {//users responsibility to null-terminate body
 
     //get which mime type
     enum file_type f = -1;
@@ -106,7 +107,7 @@ Response *format_get_file(char *body, char *file_name) {//users responsibility t
 
 
     //get the string and num bytes for the length of body
-    int body_len = strlen(body);
+    int body_len = body->size;
 
     char content_len_buf[BUF_SIZE];
     int content_line_len = string_from_int(content_len_buf, body_len) + CONTENT_LINE_BYTES;
@@ -128,7 +129,7 @@ Response *format_get_file(char *body, char *file_name) {//users responsibility t
     memcpy(buf+template_len+mime_line_len+content_line_len-4, "\r\n\r\n", 4);
 
     //copy body
-    memcpy(buf+template_len+mime_line_len+content_line_len, body, body_len);
+    memcpy(buf+template_len+mime_line_len+content_line_len, body->buf, body_len);
 
     //put in thing
     Response *resp = (Response *)malloc(sizeof(Response));
@@ -136,44 +137,45 @@ Response *format_get_file(char *body, char *file_name) {//users responsibility t
     resp->capacity = template_len+mime_line_len+content_line_len+body_len;
     resp->size = template_len+mime_line_len+content_line_len+body_len;
 
+    free_dyna(body);
     return resp;
 }
 
 Response *format_unsuccessful_get() {
     Response *resp = (Response *)malloc(sizeof(Response));
-    resp->buf = "HTTP/1.1 404 Not Found\r\n"
+    resp->buf = strdup("HTTP/1.1 404 Not Found\r\n"
     "Content-Type: text/plain\r\n"
     "Content-Length: 9\r\n"
     "Connection: close\r\n"
     "\r\n"
-    "Not Found";
+    "Not Found");
 
     resp->capacity = strlen(resp->buf) + 1;
-    resp->size = resp->capacity;
+    resp->size = resp->capacity - 1;
     return resp;
 }
 
 Response *method_not_allowed() {
     Response *resp = (Response *)malloc(sizeof(Response));
-    resp->buf =  "HTTP/1.1 405 Method Not Allowed\r\n"
+    resp->buf =  strdup("HTTP/1.1 405 Method Not Allowed\r\n"
     "Content-Length: 0\r\n"
     "Connection: close\r\n"
-    "\r\n";
+    "\r\n");
 
     resp->capacity = strlen(resp->buf) + 1;
-    resp->size = resp->capacity;
+    resp->size = resp->capacity - 1;
     return resp;
 }
 
 Response *internal_server_error() {
     Response *resp = (Response *)malloc(sizeof(Response));
-    resp->buf =      "HTTP/1.1 500 Internal Server Error\r\n"
+    resp->buf = strdup("HTTP/1.1 500 Internal Server Error\r\n"
     "Content-Length: 0\r\n"
     "Connection: close\r\n"
-    "\r\n";
+    "\r\n");
 
     resp->capacity = strlen(resp->buf) + 1;
-    resp->size = resp->capacity;
+    resp->size = resp->capacity - 1;
     return resp;
 }
 

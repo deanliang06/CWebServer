@@ -6,6 +6,7 @@
 #include "request.h"
 #include "http_helper.h"
 #include "helper.h"
+#include "dyna_buffer.h"
 
 
 Routes routes = {NULL};
@@ -20,7 +21,8 @@ Response *handle_index_route(Headers *headers, char *body) {
     if (!file_exists_and_content("public/index.html")) return internal_server_error();
 
 
-    char *file_content = read_file("public/index.html");
+    Buffer *file_content = read_file("public/index.html");
+    if (!file_content) return internal_server_error();
     return format_get_file(file_content, "public/index.html");
 }
 
@@ -29,7 +31,8 @@ Response *handle_style_route(Headers *headers, char *body) {
     if (!file_exists_and_content("public/style.css")) return format_unsuccessful_get();
 
     
-    char *file_content = read_file("public/style.css");
+    Buffer *file_content = read_file("public/style.css");
+    if (!file_content) return internal_server_error();
     return format_get_file(file_content, "public/style.css");
 }
 
@@ -41,7 +44,8 @@ Response *handle_folder_route(Headers *headers, char *body) {
     
     if (file_exists_and_content(path_requested) == FILE_NOT_FOUND) return format_unsuccessful_get();
 
-    char *file_content = read_file(path_requested);
+    Buffer *file_content = read_file(path_requested);
+    if (!file_content) return internal_server_error();
     return format_get_file(file_content, path_requested);
 }
 

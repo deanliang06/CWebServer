@@ -1,11 +1,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-typedef struct Buffer {
-    char *buf;
-    int size;
-    int capacity;
-} Buffer;
+#include "dyna_buffer.h"
 
 void increase_buf(Buffer *buf) {
     int new_size = buf->capacity * 2;

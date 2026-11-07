@@ -22,6 +22,7 @@
 #define INIT_REQUEST_SIZE 1024
 #define RESP_PART 1024
 #define HEADER_MAX 16384
+#define REQ_MAX 100000
 
 #define CONNECT_ERR 10
 #define PIPE_READ_DEBUG 11
@@ -47,36 +48,17 @@ int init_signals() {
     return 0;
 }
 
-// static void print_err(int err) {
-//     char *string;
-//     switch(err) {
-//         case CONNECT_ERR:
-//             string = "Please enter amount less than 50 and more than 0";
-//             break;
-//         case PIPE_READ_DEBUG:
-//             string = "We are going to pipe";
-//             break;
-//         case SOCKET_READ:
-//             string= "We are going to socket";
-//             break;
-//         case SOCKET_RESP:
-//             string="We are done with sock";
-//             break;
-//         default:
-//             string = "Unknown error occurred";
-//     }
-
-//     printf("%s\n", string);
-// }
-
 void throw_error(int socket_fd) {
     errno = 0;
     Response *response = internal_server_error();
-    send(socket_fd, response->buf, response->size, MSG_DONTWAIT);
+    send(socket_fd, response->buf, response->size, MSG_DONTWAIT | MSG_NOSIGNAL);
     
+    free(response->buf);
+    free(response);
     if (errno) {
         printf("There was an error even sending an internal error\n");
     }
+    close(socket_fd);
 }
 
 
@@ -98,7 +80,7 @@ void handle_conn(int listen_fd, Config *cf) {
         int n = poll(&poll_struct, 1, 5000);
 
         clock_gettime(CLOCK_MONOTONIC, &time);
-        if (start_time - time.tv_sec >= cf->timeout) {
+        if (n < 0 || time.tv_sec - start_time >= cf->timeout) {
             throw_error(conn_fd);
             free_dyna(buf);
             return;
@@ -106,19 +88,35 @@ void handle_conn(int listen_fd, Config *cf) {
             continue;
         }
 
+        errno = 0;
         int buf_added = read(conn_fd, reuse_buf, INIT_REQUEST_SIZE);
 
         if (errno == EINTR) continue;
 
-        if (buf_added < 0 || buf->size > 16384) {
+        if (buf_added < 0 || buf->size+buf_added > 16384) {
             throw_error(conn_fd);
             free_dyna(buf);
             return;
+        } else if (buf_added == 0) {//represents EOF or whatever
+            break;
         }
 
         add_to_buf(buf, reuse_buf, buf_added);
     }
+
+    if (!end_of_header(buf->buf, buf->size)) {
+        throw_error(conn_fd);
+        free_dyna(buf);
+        return;
+    }
+
     Headers *header_vals = parse_headers(buf->buf, buf->size);
+
+    if (!header_vals) {
+        throw_error(conn_fd);
+        free_dyna(buf);
+        return;
+    }
 
     errno = 0;
     //put the body into buf if the content_length requires parsing
@@ -129,11 +127,13 @@ void handle_conn(int listen_fd, Config *cf) {
             struct pollfd poll_struct = {conn_fd, POLLIN, 0};
 
             int n = poll(&poll_struct, 1, 5000);
+            printf("%d\n", n);
 
             clock_gettime(CLOCK_MONOTONIC, &time);
-            if (start_time - time.tv_sec >= cf->timeout) {
+            if (n < 0 || time.tv_sec - start_time >= cf->timeout) {
                 throw_error(conn_fd);
                 free_dyna(buf);
+                free_header(header_vals);
                 return;
             } else if (n == 0) {
                 continue;
@@ -144,16 +144,24 @@ void handle_conn(int listen_fd, Config *cf) {
 
             if (errno == EINTR) continue;
 
-            if (buf_added < 0) {
+            if (buf_added < 0 || buf->size+buf_added > REQ_MAX) {
                 throw_error(conn_fd);
-                free(header_vals->req_line);
-                free(header_vals);
+                free_header(header_vals);
                 free_dyna(buf);
                 return;
+            } else if (buf_added == 0) {
+                break;
             }
             
             add_to_buf(buf, reuse_buf, buf_added);
         }
+    }
+
+    if (!body_enough(buf->buf, buf->size, header_vals->content_length)) {
+        throw_error(conn_fd);
+        free_dyna(buf);
+        free_header(header_vals);
+        return;
     }
 
     //extract the body
@@ -171,19 +179,49 @@ void handle_conn(int listen_fd, Config *cf) {
     //send message in blocks so that it doesn't fail when too large
     int resp_len = response->size;
     int sent = 0;
+
+    //enforce max time to send
+    clock_gettime(CLOCK_MONOTONIC, &time);
+    start_time = time.tv_sec;
+
+    //poll struct
+    struct pollfd poll_struct = {conn_fd, POLLOUT, 0};
+
     while (resp_len > 0) {
-        send(conn_fd, response->buf+sent, (RESP_PART < resp_len) ? RESP_PART : resp_len, MSG_DONTWAIT);
-        resp_len-=RESP_PART;
-        sent+=RESP_PART;
+        errno = 0;
+
+        int n = poll(&poll_struct, 1, 5000);
+
+        clock_gettime(CLOCK_MONOTONIC, &time);
+        if (n < 0 || time.tv_sec - start_time > cf->timeout) {
+            throw_error(conn_fd);
+            if (header_vals->content_length) free(body);
+            free_header(header_vals);
+            free(response->buf);
+            free(response);
+            free_dyna(buf);    
+            return;
+        }
+
+        if (n == 0 || !(poll_struct.revents & POLLOUT)) continue;
+
+
+        int sent_part = send(conn_fd, response->buf+sent, (RESP_PART < resp_len) ? RESP_PART : resp_len, MSG_DONTWAIT | MSG_NOSIGNAL);
+        if (sent_part < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+            continue;
+        } else if (sent_part < 0 && errno != 0) {
+            break;
+        }
+        resp_len-=sent_part;
+        sent+=sent_part;
     }
 
     //close the connection (lol)
     close(conn_fd);
         
     //free all the things allocated in this function
-    free(body);
-    free(header_vals->req_line);
-    free(header_vals);
+    if (header_vals->content_length) free(body);
+    free_header(header_vals);
     free(response->buf);
     free(response);
     free_dyna(buf);    
